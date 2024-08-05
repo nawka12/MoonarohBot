@@ -1,7 +1,9 @@
-const { Client, GatewayIntentBits, REST, Routes, EmbedBuilder } = require("discord.js");
-const { Player, QueueRepeatMode } = require("discord-player");
+const fs = require('fs');
+const path = require('path');
+const { Client, GatewayIntentBits, REST, Routes, Collection } = require("discord.js");
+const { Player } = require("discord-player");
 require("@discord-player/extractor");
-const { YoutubeiExtractor } = require("discord-player-youtubei")
+const { YoutubeiExtractor } = require("discord-player-youtubei");
 require('dotenv').config();
 const { ActivityType } = require('discord.js');
 const config = require("./config.json");
@@ -14,75 +16,23 @@ const client = new Client({
     ]
 });
 
-const commands = [
-    {
-        name: 'play',
-        description: 'Plays a song from YouTube',
-        options: [
-            {
-                name: 'query',
-                type: 3,
-                description: 'The song you want to play',
-                required: true
-            }
-        ]
-    },
-    {
-        name: 'skip',
-        description: 'Skip to the next song in the queue'
-    },
-    {
-        name: 'stop',
-        description: 'Stops the music and clears the queue'
-    },
-    {
-        name: 'deploy',
-        description: 'Manually deploy slash commands (Admin only)'
-    },
-    {
-        name: 'queue',
-        description: 'Shows the current music queue'
-    },
-    {
-        name: 'remove',
-        description: 'Remove a track from the queue by its number',
-        options: [
-            {
-                name: 'number',
-                type: 4, // INTEGER type
-                description: 'The queue number of the track to remove',
-                required: true
-            }
-        ]
-    },
-    {
-        name: 'nowplaying',
-        description: 'Shows information about the currently playing song'
-    },
-    {
-        name: 'loop',
-        description: 'Set loop mode for the queue',
-        options: [
-            {
-                name: 'mode',
-                type: 3, // STRING type
-                description: 'The loop mode (off, track, queue)',
-                required: true,
-                choices: [
-                    { name: 'Off', value: 'off' },
-                    { name: 'Track', value: 'track' },
-                    { name: 'Queue', value: 'queue' }
-                ]
-            }
-        ]
-    },
-];
+client.commands = new Collection();
+const commandsPath = path.join(__dirname, 'commands');
+const commandFiles = fs.readdirSync(commandsPath).filter(file => file.endsWith('.js'));
+
+for (const file of commandFiles) {
+    const filePath = path.join(commandsPath, file);
+    const command = require(filePath);
+    client.commands.set(command.name, command);
+}
 
 const rest = new REST({ version: '10' }).setToken(process.env.TOKEN);
 
 async function deployCommands(guildId) {
     try {
         console.log(`Started refreshing application (/) commands for guild ${guildId}.`);
+
+        const commands = Array.from(client.commands.values());
 
         await rest.put(
             Routes.applicationGuildCommands(client.application.id, guildId),
@@ -98,12 +48,10 @@ async function deployCommands(guildId) {
 client.on("ready", async () => {
     console.log("Bot is online!");
     
-    // Set the activity
     client.user.setActivity(config.activity.name, { 
         type: ActivityType[config.activity.type]
     });
 
-    // Deploy commands to all guilds
     for (const guild of client.guilds.cache.values()) {
         await deployCommands(guild.id);
     }
@@ -119,7 +67,7 @@ client.on("warn", console.warn);
 
 const player = new Player(client);
 
-player.extractors.register(YoutubeiExtractor, {})
+player.extractors.register(YoutubeiExtractor, {});
 
 player.extractors.loadDefault((ext) => ext !== 'YouTubeExtractor').then(r => console.log('Extractors loaded successfully'));
 
@@ -139,33 +87,17 @@ player.events.on('emptyQueue', (queue) => {
     if (queue.metadata) queue.metadata.send('Queue finished. Disconnecting from voice channel.');
 });
 
-function createProgressBar(current, total, barSize = 20) {
-    const progress = Math.round((current / total) * barSize);
-    const emptyProgress = barSize - progress;
-
-    const progressText = '▇'.repeat(progress);
-    const emptyProgressText = '—'.repeat(emptyProgress);
-
-    return `[${progressText}${emptyProgressText}]`;
-}
-
 client.on("interactionCreate", async (interaction) => {
     if (!interaction.isCommand() || !interaction.guildId) return;
 
-    const { commandName } = interaction;
+    const command = client.commands.get(interaction.commandName);
+
+    if (!command) return;
+
     const member = interaction.member;
     const voiceChannel = member.voice.channel;
 
-    if (commandName === "deploy") {
-        if (!interaction.member.permissions.has("ADMINISTRATOR")) {
-            return interaction.reply({ content: "You need to be an administrator to use this command!", ephemeral: true });
-        }
-        await interaction.deferReply({ ephemeral: true });
-        await deployCommands(interaction.guildId);
-        return interaction.followUp({ content: "Slash commands have been redeployed!", ephemeral: true });
-    }
-
-    if (!voiceChannel) {
+    if (interaction.commandName !== "deploy" && !voiceChannel) {
         return interaction.reply({ content: "You need to be in a voice channel!", ephemeral: true });
     }
 
@@ -173,128 +105,11 @@ client.on("interactionCreate", async (interaction) => {
         return interaction.reply({ content: "I'm already in a different voice channel!", ephemeral: true });
     }
 
-    if (commandName === "play") {
-        await interaction.deferReply();
-
-        const query = interaction.options.getString("query", true);
-        const searchResult = await player.search(query, { requestedBy: interaction.user }).catch(() => {});
-        if (!searchResult || !searchResult.tracks.length)
-            return interaction.followUp({ content: "No results were found!" });
-
-        try {
-            const { track } = await player.play(voiceChannel, searchResult, {
-                nodeOptions: {
-                    metadata: interaction.channel
-                }
-            });
-
-            return interaction.followUp({ content: `⏱ | Loading track **${track.title}**!` });
-        } catch (error) {
-            console.error("Error in play command:", error);
-            return interaction.followUp({ content: `There was an error while executing this command: ${error}` });
-        }
-    } else if (commandName === "skip") {
-        await interaction.deferReply();
-        const queue = player.nodes.get(interaction.guildId);
-        if (!queue || !queue.isPlaying())
-            return interaction.followUp({ content: "❌ | No music is being played!" });
-        
-        const currentTrack = queue.currentTrack;
-        const success = queue.node.skip();
-        return interaction.followUp({
-            content: success ? `✅ | Skipped **${currentTrack.title}**!` : "❌ | Something went wrong!"
-        });
-    } else if (commandName === "stop") {
-        await interaction.deferReply();
-        const queue = player.nodes.get(interaction.guildId);
-        if (!queue || !queue.isPlaying())
-            return interaction.followUp({ content: "❌ | No music is being played!" });
-        
-        queue.delete();
-        return interaction.followUp({ content: "🛑 | Stopped the player!" });
-    }
-    else if (commandName === "queue") {
-        const queue = player.nodes.get(interaction.guildId);
-        if (!queue || !queue.isPlaying()) {
-            return interaction.reply({ content: "❌ | No music is being played!", ephemeral: true });
-        }
-        
-        const currentTrack = queue.currentTrack;
-        const tracks = queue.tracks.toArray();
-    
-        let response = `**Currently Playing:**\n${currentTrack.title}\n\n`;
-    
-        if (tracks.length) {
-            response += `**Queue:**\n${tracks.map((track, i) => `${i + 1}. ${track.title}`).join("\n")}`;
-        }
-    
-        return interaction.reply({ content: response });
-    }
-    else if (commandName === "remove") {
-        const queue = player.nodes.get(interaction.guildId);
-        if (!queue || !queue.isPlaying()) {
-            return interaction.reply({ content: "❌ | No music is being played!", ephemeral: true });
-        }
-    
-        const trackNum = interaction.options.getInteger("number");
-        if (trackNum <= 0 || trackNum > queue.tracks.size) {
-            return interaction.reply({ content: "❌ | Invalid track number!", ephemeral: true });
-        }
-    
-        const removedTrack = queue.tracks.toArray()[trackNum - 1];
-        queue.removeTrack(trackNum - 1);
-    
-        return interaction.reply({ content: `🗑️ | Removed track **${removedTrack.title}** from the queue.` });
-    }
-    else if (commandName === "nowplaying") {
-        const queue = player.nodes.get(interaction.guildId);
-        if (!queue || !queue.isPlaying()) {
-            return interaction.reply({ content: "❌ | No music is being played!", ephemeral: true });
-        }
-    
-        const progress = queue.node.getTimestamp();
-        const track = queue.currentTrack;
-    
-        const embed = new EmbedBuilder()
-            .setTitle('Now Playing')
-            .setDescription(`🎶 | **${track.title}**`)
-            .setThumbnail(track.thumbnail)
-            .addFields(
-                { name: 'Duration', value: `\`${progress.current.label} / ${track.duration}\``, inline: true },
-                { name: 'Author', value: track.author, inline: true },
-                { name: 'Requested by', value: `${track.requestedBy}`, inline: true }
-            )
-            .setFooter({ text: createProgressBar(progress.current.value, track.durationMS) });
-    
-        return interaction.reply({ embeds: [embed] });
-    }
-    else if (commandName === "loop") {
-        const queue = player.nodes.get(interaction.guildId);
-        if (!queue || !queue.isPlaying()) {
-            return interaction.reply({ content: "❌ | No music is being played!", ephemeral: true });
-        }
-    
-        const loopMode = interaction.options.getString("mode");
-        let response = "";
-    
-        switch (loopMode) {
-            case "off":
-                queue.setRepeatMode(QueueRepeatMode.OFF);
-                response = "🔁 | Loop mode is now off.";
-                break;
-            case "track":
-                queue.setRepeatMode(QueueRepeatMode.TRACK);
-                response = "🔂 | Now looping the current track.";
-                break;
-            case "queue":
-                queue.setRepeatMode(QueueRepeatMode.QUEUE);
-                response = "🔁 | Now looping the entire queue.";
-                break;
-            default:
-                response = "❌ | Invalid loop mode specified.";
-        }
-    
-        return interaction.reply({ content: response });
+    try {
+        await command.execute(interaction, player);
+    } catch (error) {
+        console.error(error);
+        await interaction.reply({ content: 'There was an error while executing this command!', ephemeral: true });
     }
 });
 
