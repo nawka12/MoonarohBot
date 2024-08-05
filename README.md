@@ -1,5 +1,5 @@
 # MoonarohBot
-Discord music bot using discord-player and @distube/ytdl-core.
+Discord music bot using discord-player and discord-player-youtubei extractor.
 
 Dependencies:
 - Node.js 20 or up
