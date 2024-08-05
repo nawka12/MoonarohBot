@@ -1,5 +1,5 @@
-const { Client, GatewayIntentBits, REST, Routes } = require("discord.js");
-const { Player } = require("discord-player");
+const { Client, GatewayIntentBits, REST, Routes, EmbedBuilder } = require("discord.js");
+const { Player, QueueRepeatMode } = require("discord-player");
 require("@discord-player/extractor");
 const { YoutubeiExtractor } = require("discord-player-youtubei")
 require('dotenv').config();
@@ -52,6 +52,27 @@ const commands = [
                 type: 4, // INTEGER type
                 description: 'The queue number of the track to remove',
                 required: true
+            }
+        ]
+    },
+    {
+        name: 'nowplaying',
+        description: 'Shows information about the currently playing song'
+    },
+    {
+        name: 'loop',
+        description: 'Set loop mode for the queue',
+        options: [
+            {
+                name: 'mode',
+                type: 3, // STRING type
+                description: 'The loop mode (off, track, queue)',
+                required: true,
+                choices: [
+                    { name: 'Off', value: 'off' },
+                    { name: 'Track', value: 'track' },
+                    { name: 'Queue', value: 'queue' }
+                ]
             }
         ]
     },
@@ -117,6 +138,16 @@ player.events.on("audioTrackAdd", (queue, track) => {
 player.events.on('emptyQueue', (queue) => {
     if (queue.metadata) queue.metadata.send('Queue finished. Disconnecting from voice channel.');
 });
+
+function createProgressBar(current, total, barSize = 20) {
+    const progress = Math.round((current / total) * barSize);
+    const emptyProgress = barSize - progress;
+
+    const progressText = '▇'.repeat(progress);
+    const emptyProgressText = '—'.repeat(emptyProgress);
+
+    return `[${progressText}${emptyProgressText}]`;
+}
 
 client.on("interactionCreate", async (interaction) => {
     if (!interaction.isCommand() || !interaction.guildId) return;
@@ -214,6 +245,56 @@ client.on("interactionCreate", async (interaction) => {
         queue.removeTrack(trackNum - 1);
     
         return interaction.reply({ content: `🗑️ | Removed track **${removedTrack.title}** from the queue.` });
+    }
+    else if (commandName === "nowplaying") {
+        const queue = player.nodes.get(interaction.guildId);
+        if (!queue || !queue.isPlaying()) {
+            return interaction.reply({ content: "❌ | No music is being played!", ephemeral: true });
+        }
+    
+        const progress = queue.node.getTimestamp();
+        const track = queue.currentTrack;
+    
+        const embed = new EmbedBuilder()
+            .setTitle('Now Playing')
+            .setDescription(`🎶 | **${track.title}**`)
+            .setThumbnail(track.thumbnail)
+            .addFields(
+                { name: 'Duration', value: `\`${progress.current.label} / ${track.duration}\``, inline: true },
+                { name: 'Author', value: track.author, inline: true },
+                { name: 'Requested by', value: `${track.requestedBy}`, inline: true }
+            )
+            .setFooter({ text: createProgressBar(progress.current.value, track.durationMS) });
+    
+        return interaction.reply({ embeds: [embed] });
+    }
+    else if (commandName === "loop") {
+        const queue = player.nodes.get(interaction.guildId);
+        if (!queue || !queue.isPlaying()) {
+            return interaction.reply({ content: "❌ | No music is being played!", ephemeral: true });
+        }
+    
+        const loopMode = interaction.options.getString("mode");
+        let response = "";
+    
+        switch (loopMode) {
+            case "off":
+                queue.setRepeatMode(QueueRepeatMode.OFF);
+                response = "🔁 | Loop mode is now off.";
+                break;
+            case "track":
+                queue.setRepeatMode(QueueRepeatMode.TRACK);
+                response = "🔂 | Now looping the current track.";
+                break;
+            case "queue":
+                queue.setRepeatMode(QueueRepeatMode.QUEUE);
+                response = "🔁 | Now looping the entire queue.";
+                break;
+            default:
+                response = "❌ | Invalid loop mode specified.";
+        }
+    
+        return interaction.reply({ content: response });
     }
 });
 
