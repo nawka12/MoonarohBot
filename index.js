@@ -1,6 +1,7 @@
 const { Client, GatewayIntentBits, REST, Routes } = require("discord.js");
 const { Player } = require("discord-player");
-const { YouTubeExtractor } = require("@discord-player/extractor");
+require("@discord-player/extractor");
+const { YoutubeiExtractor } = require("discord-player-youtubei")
 require('dotenv').config();
 const { ActivityType } = require('discord.js');
 const config = require("./config.json");
@@ -97,7 +98,9 @@ client.on("warn", console.warn);
 
 const player = new Player(client);
 
-player.extractors.register(YouTubeExtractor);
+player.extractors.register(YoutubeiExtractor, {})
+
+player.extractors.loadDefault((ext) => ext !== 'YouTubeExtractor').then(r => console.log('Extractors loaded successfully'));
 
 player.events.on("error", (queue, error) => {
     console.log(`[${queue.guild.name}] Error emitted from the queue: ${error.message}`);
