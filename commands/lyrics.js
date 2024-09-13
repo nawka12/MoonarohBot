@@ -32,14 +32,12 @@ module.exports = {
                 return interaction.followUp({ content: 'Lyrics data is incomplete', ephemeral: true });
             }
 
-            const trimmedLyrics = lyricsData.plainLyrics.substring(0, 1997);
+            const baseEmbed = new EmbedBuilder()
+                .setColor('Purple');
 
-            const embed = new EmbedBuilder()
-                .setColor('Yellow');
-
-            if (lyricsData.title) embed.setTitle(lyricsData.title);
-            if (lyricsData.url) embed.setURL(lyricsData.url);
-            if (lyricsData.thumbnail) embed.setThumbnail(lyricsData.thumbnail);
+            if (lyricsData.title) baseEmbed.setTitle(lyricsData.title);
+            if (lyricsData.url) baseEmbed.setURL(lyricsData.url);
+            if (lyricsData.thumbnail) baseEmbed.setThumbnail(lyricsData.thumbnail);
 
             if (lyricsData.artist) {
                 const authorData = {
@@ -47,15 +45,50 @@ module.exports = {
                 };
                 if (lyricsData.artist.image) authorData.iconURL = lyricsData.artist.image;
                 if (lyricsData.artist.url) authorData.url = lyricsData.artist.url;
-                embed.setAuthor(authorData);
+                baseEmbed.setAuthor(authorData);
             }
 
-            embed.setDescription(trimmedLyrics.length === 1997 ? `${trimmedLyrics}...` : trimmedLyrics);
+            // Split lyrics into chunks of 4096 characters or less (Discord's embed description limit)
+            const lyricsChunks = splitLyrics(lyricsData.plainLyrics);
 
-            return interaction.followUp({ embeds: [embed] });
+            // Send embeds for each chunk
+            for (let i = 0; i < lyricsChunks.length; i++) {
+                const embed = new EmbedBuilder(baseEmbed.toJSON())
+                    .setDescription(lyricsChunks[i]);
+                
+                if (i === 0) {
+                    // First embed
+                    await interaction.followUp({ embeds: [embed] });
+                } else {
+                    // Subsequent embeds
+                    embed.setTitle(`${lyricsData.title} (continued)`);
+                    await interaction.followUp({ embeds: [embed] });
+                }
+            }
+
         } catch (error) {
             console.error("Error fetching lyrics:", error);
             return interaction.followUp({ content: "An error occurred while fetching lyrics.", ephemeral: true });
         }
     }
 };
+
+function splitLyrics(lyrics) {
+    const chunks = [];
+    let currentChunk = '';
+
+    lyrics.split('\n').forEach(line => {
+        if (currentChunk.length + line.length + 1 > 4096) {
+            chunks.push(currentChunk);
+            currentChunk = line;
+        } else {
+            currentChunk += (currentChunk ? '\n' : '') + line;
+        }
+    });
+
+    if (currentChunk) {
+        chunks.push(currentChunk);
+    }
+
+    return chunks;
+}
