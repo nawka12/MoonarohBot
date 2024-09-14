@@ -3,19 +3,27 @@ const { EmbedBuilder } = require('discord.js');
 
 module.exports = {
     name: 'lyrics',
-    description: 'Get lyrics for a song',
+    description: 'Get lyrics for the current song or a specified song',
     options: [
         {
             name: 'song',
             type: 3, // STRING type
-            description: 'The name of the song to search lyrics for',
-            required: true
+            description: 'The name of the song to search lyrics for (optional)',
+            required: false
         }
     ],
     async execute(interaction, player) {
         await interaction.deferReply();
 
-        const songQuery = interaction.options.getString('song');
+        const queue = player.nodes.get(interaction.guildId);
+        let songQuery = interaction.options.getString('song');
+
+        if (!songQuery) {
+            if (!queue || !queue.isPlaying()) {
+                return interaction.followUp({ content: 'No music is being played and no song was specified.', ephemeral: true });
+            }
+            songQuery = queue.currentTrack.title;
+        }
 
         try {
             const lyrics = await player.lyrics.search({
