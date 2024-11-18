@@ -7,6 +7,7 @@ const { YoutubeiExtractor } = require("discord-player-youtubei");
 require('dotenv').config();
 const { ActivityType } = require('discord.js');
 const config = require("./config.json");
+const { env } = require('process');
 
 const client = new Client({
     intents: [
@@ -67,7 +68,9 @@ client.on("warn", console.warn);
 
 const player = new Player(client);
 
-player.extractors.register(YoutubeiExtractor, {});
+player.extractors.register(YoutubeiExtractor, {
+    authentication: process.env.OAUTH_TOKEN ?? ""
+});
 
 player.extractors.loadDefault((ext) => ext !== 'YouTubeExtractor').then(r => console.log('Extractors loaded successfully'));
 
