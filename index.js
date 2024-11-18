@@ -69,8 +69,10 @@ client.on("warn", console.warn);
 const player = new Player(client);
 
 player.extractors.register(YoutubeiExtractor, {
-    authentication: process.env.OAUTH_TOKEN ?? "",
-    overrideBridgeMode: "yt"
+    // authentication: process.env.OAUTH_TOKEN ?? "",
+    streamOptions: {
+        useClient: "ANDROID"
+    }
 });
 
 player.extractors.loadDefault((ext) => ext !== 'YouTubeExtractor').then(r => console.log('Extractors loaded successfully'));
