@@ -76,8 +76,6 @@ player.extractors.register(YoutubeiExtractor, {
     },
     overrideDownloadOptions: {
         quality: "lowest",
-        filter: "audioonly",
-        format: "mp3",
         requestOptions: {
             maxRetries: 3,
             maxReconnects: 3
