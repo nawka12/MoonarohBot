@@ -7,7 +7,6 @@ const { YoutubeiExtractor } = require("discord-player-youtubei");
 require('dotenv').config();
 const { ActivityType } = require('discord.js');
 const config = require("./config.json");
-const { env } = require('process');
 
 const client = new Client({
     intents: [
@@ -68,75 +67,23 @@ client.on("warn", console.warn);
 
 const player = new Player(client);
 
-player.extractors.register(YoutubeiExtractor, {
-    overrideBridgeMode: "yt",
-    streamOptions: {
-        useClient: "ANDROID",
-        highWaterMark: 1 << 25
-    },
-    overrideDownloadOptions: {
-        quality: "lowest",
-        requestOptions: {
-            maxRetries: 3,
-            maxReconnects: 3
-        }
-    },
-    disablePlayer: false,
-    innertubeConfigRaw: {
-        client: {
-            clientName: 'ANDROID',
-            clientVersion: '17.31.35',
-            androidSdk: 30,
-            userAgent: 'com.google.android.youtube/17.31.35 (Linux; U; Android 11) gzip'
-        }
-    }
-});
+player.extractors.register(YoutubeiExtractor, {});
 
 player.extractors.loadDefault((ext) => ext !== 'YouTubeExtractor').then(r => console.log('Extractors loaded successfully'));
 
 player.events.on("error", (queue, error) => {
-    console.error(`[${queue.guild.name}] General Error:`, error.message);
-});
-
-player.events.on("playerError", (queue, error) => {
-    console.error(`[${queue.guild.name}] Player Error:`, error.message);
-    
-    if (error.message.includes("No matching formats found")) {
-        if (queue.metadata) {
-            queue.metadata.send("⚠️ Sorry, this track couldn't be played due to format restrictions. Skipping to next song...");
-        }
-        
-        if (queue.tracks.size > 0) {
-            queue.node.skip();
-        }
-    }
+    console.log(`[${queue.guild.name}] Error emitted from the queue: ${error.message}`);
 });
 
 player.events.on("playerStart", (queue, track) => {
     if (queue.metadata) queue.metadata.send(`🎶 | Started playing: **${track.title}** in **${queue.channel.name}**!`);
 });
 
-player.events.on("playerSkip", (queue, track) => {
-    console.log(`[${queue.guild.name}] Track ${track.title} was skipped due to an issue`);
+player.events.on("audioTrackAdd", (queue, track) => {
+    if (queue.metadata) queue.metadata.send(`🎶 | Track **${track.title}** queued!`);
 });
 
-player.events.on("playerFinish", (queue, track) => {
-    console.log(`[${queue.guild.name}] Track ${track.title} finished playing normally`);
-});
-
-player.events.on("connectionError", (queue, error) => {
-    console.error(`[${queue.guild.name}] Connection Error:`, error);
-});
-
-player.events.on("disconnect", (queue) => {
-    console.log(`[${queue.guild.name}] Disconnected from voice channel`);
-});
-
-player.events.on("emptyChannel", (queue) => {
-    console.log(`[${queue.guild.name}] Nobody is in the voice channel, leaving...`);
-});
-
-player.events.on("emptyQueue", (queue) => {
+player.events.on('emptyQueue', (queue) => {
     if (queue.metadata) queue.metadata.send('Queue finished. Disconnecting from voice channel.');
 });
 
