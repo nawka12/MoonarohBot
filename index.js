@@ -69,6 +69,7 @@ client.on("warn", console.warn);
 const player = new Player(client);
 
 player.extractors.register(YoutubeiExtractor, {
+    overrideBridgeMode: "yt",
     // authentication: process.env.OAUTH_TOKEN ?? "",
     streamOptions: {
         useClient: "ANDROID"
