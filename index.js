@@ -70,9 +70,13 @@ const player = new Player(client);
 
 player.extractors.register(YoutubeiExtractor, {
     overrideBridgeMode: "yt",
-    // authentication: process.env.OAUTH_TOKEN ?? "",
     streamOptions: {
-        useClient: "ANDROID"
+        useClient: "ANDROID",
+        highWaterMark: 1 << 25 // 32MB buffer
+    },
+    overrideDownloadOptions: {
+        quality: "highest",
+        filter: "audioonly"
     }
 });
 
