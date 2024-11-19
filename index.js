@@ -83,18 +83,38 @@ player.extractors.register(YoutubeiExtractor, {
 player.extractors.loadDefault((ext) => ext !== 'YouTubeExtractor').then(r => console.log('Extractors loaded successfully'));
 
 player.events.on("error", (queue, error) => {
-    console.log(`[${queue.guild.name}] Error emitted from the queue: ${error.message}`);
+    console.error(`[${queue.guild.name}] General Error:`, error.message);
+});
+
+player.events.on("playerError", (queue, error) => {
+    console.error(`[${queue.guild.name}] Player Error:`, error.message);
 });
 
 player.events.on("playerStart", (queue, track) => {
     if (queue.metadata) queue.metadata.send(`🎶 | Started playing: **${track.title}** in **${queue.channel.name}**!`);
 });
 
-player.events.on("audioTrackAdd", (queue, track) => {
-    if (queue.metadata) queue.metadata.send(`🎶 | Track **${track.title}** queued!`);
+player.events.on("playerSkip", (queue, track) => {
+    console.log(`[${queue.guild.name}] Track ${track.title} was skipped due to an issue`);
 });
 
-player.events.on('emptyQueue', (queue) => {
+player.events.on("playerFinish", (queue, track) => {
+    console.log(`[${queue.guild.name}] Track ${track.title} finished playing normally`);
+});
+
+player.events.on("connectionError", (queue, error) => {
+    console.error(`[${queue.guild.name}] Connection Error:`, error);
+});
+
+player.events.on("disconnect", (queue) => {
+    console.log(`[${queue.guild.name}] Disconnected from voice channel`);
+});
+
+player.events.on("emptyChannel", (queue) => {
+    console.log(`[${queue.guild.name}] Nobody is in the voice channel, leaving...`);
+});
+
+player.events.on("emptyQueue", (queue) => {
     if (queue.metadata) queue.metadata.send('Queue finished. Disconnecting from voice channel.');
 });
 
