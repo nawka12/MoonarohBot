@@ -72,11 +72,25 @@ player.extractors.register(YoutubeiExtractor, {
     overrideBridgeMode: "yt",
     streamOptions: {
         useClient: "ANDROID",
-        highWaterMark: 1 << 25 // 32MB buffer
+        highWaterMark: 1 << 25
     },
     overrideDownloadOptions: {
-        quality: "highest",
-        filter: "audioonly"
+        quality: "lowest",
+        filter: "audioonly",
+        format: "mp3",
+        requestOptions: {
+            maxRetries: 3,
+            maxReconnects: 3
+        }
+    },
+    disablePlayer: false,
+    innertubeConfigRaw: {
+        client: {
+            clientName: 'ANDROID',
+            clientVersion: '17.31.35',
+            androidSdk: 30,
+            userAgent: 'com.google.android.youtube/17.31.35 (Linux; U; Android 11) gzip'
+        }
     }
 });
 
@@ -88,6 +102,16 @@ player.events.on("error", (queue, error) => {
 
 player.events.on("playerError", (queue, error) => {
     console.error(`[${queue.guild.name}] Player Error:`, error.message);
+    
+    if (error.message.includes("No matching formats found")) {
+        if (queue.metadata) {
+            queue.metadata.send("⚠️ Sorry, this track couldn't be played due to format restrictions. Skipping to next song...");
+        }
+        
+        if (queue.tracks.size > 0) {
+            queue.node.skip();
+        }
+    }
 });
 
 player.events.on("playerStart", (queue, track) => {
