@@ -7,6 +7,7 @@ const { YoutubeiExtractor } = require("discord-player-youtubei");
 require('dotenv').config();
 const { ActivityType } = require('discord.js');
 const config = require("./config.json");
+const { poTokenExtraction } = require('discord-player-youtubei/experimental');
 
 const client = new Client({
     intents: [
@@ -67,7 +68,25 @@ client.on("warn", console.warn);
 
 const player = new Player(client);
 
-player.extractors.register(YoutubeiExtractor, {});
+async function setupExtractor() {
+    try {
+        const ext = await player.extractors.register(YoutubeiExtractor, {
+            streamOptions: {
+                useClient: "WEB"
+            }
+        });
+
+        const innertube = ext.innerTube;
+        const token = await poTokenExtraction(innertube);
+        ext.setPoToken(token.poToken, innertube.session.context.client.visitorData);
+        
+        console.log('YouTube extractor configured successfully with PoToken');
+    } catch (error) {
+        console.error('Error setting up YouTube extractor:', error);
+    }
+}
+
+setupExtractor();
 
 player.extractors.loadDefault((ext) => ext !== 'YouTubeExtractor').then(r => console.log('Extractors loaded successfully'));
 
