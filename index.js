@@ -107,6 +107,15 @@ player.events.on('emptyQueue', (queue) => {
     if (queue.metadata) queue.metadata.send('Queue finished. Disconnecting from voice channel.');
 });
 
+player.events.on("playerError", (queue, error) => {
+    console.log(`[${queue.guild.name}] Error emitted from the player: ${error.message}`);
+    if (error.message.includes("login required")) {
+        queue.metadata.send("❌ | Cannot play this video as it requires age verification/login. Please try another video.");
+    } else {
+        queue.metadata.send("❌ | An error occurred while playing the track.");
+    }
+});
+
 client.on("interactionCreate", async (interaction) => {
     if (!interaction.isCommand() || !interaction.guildId) return;
 
