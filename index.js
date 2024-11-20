@@ -81,6 +81,7 @@ async function setupExtractor() {
         ext.setPoToken(token.poToken, innertube.session.context.client.visitorData);
         
         console.log('YouTube extractor configured successfully with PoToken');
+        console.log(token);
     } catch (error) {
         console.error('Error setting up YouTube extractor:', error);
     }
