@@ -10,18 +10,118 @@ module.exports = {
             required: true
         }
     ],
+    
     async execute(interaction, player) {
         await interaction.deferReply();
 
         const query = interaction.options.getString("query", true);
-        const searchResult = await player.search(query, { requestedBy: interaction.user }).catch((error) => {
+        let actualQuery = query;
+        let isExternalSource = false;
+        let canStreamDirectly = false;
+        
+        // Handle external music service links (Spotify, Apple Music, SoundCloud)
+        if (query.includes('spotify.com') || query.includes('music.apple.com') || query.includes('soundcloud.com')) {
+            isExternalSource = true;
+            
+            // Step 1: Use official extractors to get metadata
+            if (query.includes('spotify.com')) {
+                await interaction.followUp({ content: `🔍 | Detected Spotify link, extracting song information...` });
+                console.log(`Using extractors for Spotify URL: ${query}`);
+            } else if (query.includes('music.apple.com')) {
+                await interaction.followUp({ content: `🔍 | Detected Apple Music link, extracting song information...` });
+                console.log(`Using extractors for Apple Music URL: ${query}`);
+            } else if (query.includes('soundcloud.com')) {
+                await interaction.followUp({ content: `🔍 | Detected SoundCloud link, extracting song information...` });
+                console.log(`Using extractors for SoundCloud URL: ${query}`);
+                // SoundCloud extractor supports direct streaming
+                canStreamDirectly = true;
+            }
+            
+            // Use extractors to get track info
+            const externalResult = await player.search(query, { 
+                requestedBy: interaction.user
+            }).catch((error) => {
+                console.error("External source extraction error:", error);
+                return null;
+            });
+            
+            // If we found a track...
+            if (externalResult && externalResult.tracks.length > 0) {
+                const extractedTrack = externalResult.tracks[0];
+                
+                // For SoundCloud tracks
+                if (canStreamDirectly && query.includes('soundcloud.com')) {
+                    await interaction.followUp({ 
+                        content: `✅ | Found "${extractedTrack.title}" from SoundCloud\n▶️ | Playing directly via SoundCloud...` 
+                    });
+                    
+                    console.log(`Playing track directly from SoundCloud: "${extractedTrack.title}"`);
+                    
+                    // Process the result directly without YouTube search
+                    return this.processSearchResult(interaction, player, externalResult, query, extractedTrack.title, isExternalSource, true);
+                }
+                // For services that don't support streaming (Spotify, Apple Music)
+                else {
+                    actualQuery = extractedTrack.title;
+                    
+                    if (extractedTrack.author) {
+                        actualQuery = `${extractedTrack.author} ${extractedTrack.title}`;
+                    }
+                    
+                    await interaction.followUp({ 
+                        content: `✅ | Found "${extractedTrack.title}" from ${query.includes('spotify.com') ? 'Spotify' : 'Apple Music'}\n🔍 | Searching YouTube for best match...` 
+                    });
+                    
+                    console.log(`Extracted track info: "${actualQuery}", now searching YouTube`);
+                }
+            } else {
+                // Only show failure message if track extraction actually failed
+                // This was showing up even when SoundCloud extraction succeeded
+                if (!canStreamDirectly || !externalResult) {
+                    await interaction.followUp({ 
+                        content: `❌ | Couldn't extract track info from URL. Trying to use URL directly...` 
+                    });
+                }
+            }
+            
+            // Step 2: If we got track info and need YouTube (for Spotify/Apple), search YouTube with it
+            if (actualQuery !== query && !canStreamDirectly) {
+                // Use the YouTubei extractor with the song title
+                const searchResult = await player.search(actualQuery, { 
+                    requestedBy: interaction.user
+                }).catch((error) => {
+                    console.error("YouTube search error:", error);
+                    return null;
+                });
+                
+                // If we found YouTube results, proceed with them
+                if (searchResult && searchResult.tracks.length > 0) {
+                    console.log(`Found ${searchResult.tracks.length} YouTube results for "${actualQuery}"`);
+                    // Continue with these search results
+                    return this.processSearchResult(interaction, player, searchResult, query, actualQuery, isExternalSource, false);
+                } else {
+                    return interaction.followUp({ content: `❌ | Couldn't find any YouTube matches for "${actualQuery}"` });
+                }
+            }
+        }
+        
+        // Regular search for non-external sources or fallback if extraction failed
+        const searchResult = await player.search(actualQuery, { 
+            requestedBy: interaction.user
+        }).catch((error) => {
             console.error("Search error:", error);
             return null;
         });
         
         if (!searchResult || !searchResult.tracks.length)
             return interaction.followUp({ content: "No results were found!" });
-
+            
+        // Process the search results
+        return this.processSearchResult(interaction, player, searchResult, query, actualQuery, isExternalSource, false);
+    },
+    
+    // Helper method to process search results and play tracks
+    async processSearchResult(interaction, player, searchResult, originalQuery, actualQuery, isExternalSource, isDirectStreamSource) {
         try {
             // Initialize the attempted tracks set for this guild if needed
             const guildId = interaction.guild.id;
@@ -36,22 +136,35 @@ module.exports = {
             const topTracks = searchResult.tracks.slice(0, 3);
             
             // Debug the tracks found
-            console.log(`Found ${topTracks.length} tracks for "${query}":`);
+            console.log(`Found ${topTracks.length} tracks for "${actualQuery}":`);
             topTracks.forEach((t, i) => {
                 console.log(`${i+1}. ${t.title} (${t.url}) - Duration: ${t.duration}`);
             });
             
             // Check if this is a direct YouTube link (will have only one result)
-            const isDirectLink = query.includes('youtube.com/watch?v=') || query.includes('youtu.be/');
+            const isDirectLink = originalQuery.includes('youtube.com/watch?v=') || originalQuery.includes('youtu.be/');
             
             // Send acknowledgment with appropriate message
-            if (isDirectLink) {
+            if (isExternalSource) {
+                // Direct streaming source like SoundCloud
+                if (isDirectStreamSource) {
+                    await interaction.followUp({ 
+                        content: `⏱ | Starting playback directly from SoundCloud: **${topTracks[0].title}**` 
+                    });
+                }
+                // External source requiring YouTube (Spotify, Apple Music)
+                else {
+                    await interaction.followUp({ 
+                        content: `⏱ | Found ${topTracks.length} YouTube matches for "${actualQuery}".\nPlaying the best match.` 
+                    });
+                }
+            } else if (isDirectLink) {
                 await interaction.followUp({ 
-                    content: `⏱ | Loading track from URL: **${query}**\nIf it fails, I'll try searching by title.` 
+                    content: `⏱ | Loading track from URL: **${originalQuery}**\nIf it fails, I'll try searching by title.` 
                 });
             } else {
                 await interaction.followUp({ 
-                    content: `⏱ | Searching for: **${query}**\nFound ${topTracks.length} results, will try alternative tracks if the first one fails.` 
+                    content: `⏱ | Searching for: **${originalQuery}**\nFound ${topTracks.length} results, will try alternative tracks if the first one fails.` 
                 });
             }
 
@@ -100,6 +213,17 @@ module.exports = {
                 if (result && result.track) {
                     // Add a property to track that this was the initial track
                     result.track._initialTrack = true;
+                    
+                    // If this was from an external source, add that info
+                    if (isExternalSource) {
+                        result.track._fromExternalSource = true;
+                        result.track._originalQuery = originalQuery;
+                        
+                        // Add information about direct streaming
+                        if (isDirectStreamSource) {
+                            result.track._isDirectStream = true;
+                        }
+                    }
                 }
             } catch (playError) {
                 console.error(`Error playing first track: ${playError.message}`);

@@ -127,6 +127,16 @@ player.events.on("error", (queue, error) => {
 player.events.on("playerError", (queue, error, track) => {
     console.log(`[${queue.guild.name}] Error emitted from the player while playing ${track.title}: ${error.message}`);
     
+    // Check if this is a SoundCloud track that failed
+    if (track._isDirectStream && track._fromExternalSource && track._originalQuery.includes('soundcloud.com')) {
+        if (queue.metadata) {
+            queue.metadata.send({
+                content: `❌ | Failed to play track from SoundCloud: **${track.title}**. Error: ${error.message}`
+            });
+        }
+        return;
+    }
+    
     // Check for YouTube extraction errors
     if (error.message.includes("Could not extract stream") || 
         error.message.includes("Status code: 410") || 
@@ -362,8 +372,26 @@ player.events.on("playerStart", (queue, track) => {
     // This prevents duplicate or conflicting messages
     
     if (queue.metadata) {
+        // Direct streaming from SoundCloud
+        if (track._fromExternalSource && track._isDirectStream) {
+            queue.metadata.send(`🎶 | Now playing directly from SoundCloud: **${track.title}** in **${queue.channel.name}**!`);
+        }
+        // If this is a track from an external source (Spotify, Apple Music)
+        else if (track._fromExternalSource) {
+            // Determine the correct source based on the original query
+            let source = "Unknown Source";
+            if (track._originalQuery.includes('spotify.com')) {
+                source = 'Spotify';
+            } else if (track._originalQuery.includes('music.apple.com')) {
+                source = 'Apple Music';
+            } else if (track._originalQuery.includes('soundcloud.com')) {
+                source = 'SoundCloud';
+            }
+            
+            queue.metadata.send(`🎶 | Started playing: **${track.title}** (found via ${source}) in **${queue.channel.name}**!`);
+        }
         // If this is a fallback track with a fallback attempt number
-        if (track._fallbackAttempt && track._fallbackAttemptNumber) {
+        else if (track._fallbackAttempt && track._fallbackAttemptNumber) {
             queue.metadata.send(`✅ | Successfully playing alternative (${track._fallbackAttemptNumber}/3): **${track.title}** in **${queue.channel.name}**!`);
         }
         // If this is a fallback track without a number (from title search)
