@@ -246,10 +246,71 @@ module.exports = {
                 leaveOnEndCooldown: 30000, // 30 second delay before leaving
             };
 
+            // Add a handler to catch download errors early
+            const handleTrackError = async (track, errorMessage, attemptNumber = 1) => {
+                console.log(`Track error handler called: ${errorMessage} (attempt: ${attemptNumber})`);
+                
+                // Check if it's a download error
+                const isDownloadError = errorMessage.includes("Downloading of") || 
+                                       errorMessage.includes("download failed") ||
+                                       errorMessage.includes("Could not extract stream") || 
+                                       errorMessage.includes("Status code: 410") || 
+                                       errorMessage.includes("Status code: 403");
+                
+                if (isDownloadError && player.fallbackTracksMap.has(guildId)) {
+                    const fallbackTracks = player.fallbackTracksMap.get(guildId);
+                    if (fallbackTracks.length > 0) {
+                        const fallbackTrack = fallbackTracks.shift();
+                        
+                        // Mark that we attempted this track
+                        if (fallbackTrack && fallbackTrack.url) {
+                            player.attemptedTracksSet.get(guildId).add(fallbackTrack.url);
+                        }
+                        
+                        await interaction.channel.send({ 
+                            content: `❌ | Error downloading track. Trying alternative (${attemptNumber+1}/3): **${fallbackTrack.title}**` 
+                        });
+                        
+                        try {
+                            fallbackTrack._fallbackAttempt = true;
+                            fallbackTrack._fallbackAttemptNumber = attemptNumber + 1;
+                            
+                            const result = await player.play(
+                                interaction.member.voice.channel,
+                                fallbackTrack,
+                                { nodeOptions }
+                            );
+                            
+                            return result;
+                        } catch (nextError) {
+                            // If we're at the last attempt, give up
+                            if (attemptNumber >= 2 || fallbackTracks.length === 0) {
+                                await interaction.channel.send({ 
+                                    content: `❌ | All alternatives failed. Please try a different search query.` 
+                                });
+                                return null;
+                            }
+                            
+                            // Try the next track
+                            return handleTrackError(fallbackTrack, nextError.message, attemptNumber + 1);
+                        }
+                    }
+                }
+                
+                // If we get here, either it's not a download error or we have no fallbacks
+                return null;
+            };
+
             // Play the first track
             try {
                 const result = await player.play(interaction.member.voice.channel, topTracks[0], {
-                    nodeOptions: nodeOptions
+                    nodeOptions: nodeOptions,
+                    // Add enhanced error handling
+                    onError: (error) => {
+                        console.error(`Error in player.play handler: ${error.message}`);
+                        // Will be handled by the try/catch
+                        throw error;
+                    }
                 });
                 
                 console.log(`Play result: ${result ? "success" : "failed"}`);
@@ -285,6 +346,18 @@ module.exports = {
                 
                 console.error(`Error playing first track: ${playError.message}`);
                 console.log(`Is YouTube download error: ${isYouTubeDownloadError}`);
+                
+                // Try to use our handler to recover
+                if (isYouTubeDownloadError) {
+                    const recoveryResult = await handleTrackError(topTracks[0], playError.message);
+                    if (recoveryResult) {
+                        // Success! We recovered using the handler
+                        return;
+                    }
+                }
+                
+                // If we get here, either it's not a download error or the handler couldn't recover
+                // Continue with existing error handling...
                 
                 // Mark that we attempted this track
                 if (topTracks[0] && topTracks[0].url) {

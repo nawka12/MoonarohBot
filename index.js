@@ -79,7 +79,35 @@ client.on("warn", console.warn);
 const player = new Player(client, {
     ytdlOptions: {
         quality: 'highestaudio',
-        highWaterMark: 1 << 25 // 32MB buffer
+        highWaterMark: 1 << 25, // 32MB buffer
+    },
+    // Add specific error handling for extraction and download failures
+    skipOnFail: true, // Important: Don't crash on failed tracks, try to skip
+    connectionTimeout: 60000, // Give enough time for connections
+    async extractorStreamStrategy(track) {
+        try {
+            // Normal extraction process
+            return await this.stream(track);
+        } catch (error) {
+            console.error(`Extraction error for track ${track.title}: ${error.message}`);
+            
+            // Create a guildId variable we can use through the error handling
+            const guildId = track.metadata?.guild?.id;
+            if (!guildId) {
+                throw error; // If we don't have guild ID, we can't handle it
+            }
+            
+            // Trigger manual error event to handle fallback
+            const queue = this.nodes.get(guildId);
+            if (queue) {
+                this.events.emit('playerError', queue, error, track);
+                // Return a placeholder to prevent crash, the playerError will handle the fallback
+                return null;
+            }
+            
+            // If we couldn't handle it, rethrow
+            throw error;
+        }
     }
 });
 
@@ -94,7 +122,9 @@ async function setupExtractors() {
         player.extractors.register(YoutubeiExtractor, {
             // Improved options for better streaming reliability
             streamOptions: {
-                highWaterMark: 1 << 25 // 32MB for smoother streaming
+                highWaterMark: 1 << 25, // 32MB for smoother streaming
+                dlChunkSize: 0, // Set to 0 to avoid download issues
+                begin: 0 // Start from the beginning
             },
             // Try using YT Music bridge mode which might have better success rates
             overrideBridgeMode: "ytmusic",
@@ -127,26 +157,27 @@ player.events.on("error", (queue, error) => {
 player.events.on("playerError", (queue, error, track) => {
     console.log(`[${queue.guild.name}] Error emitted from the player while playing ${track.title}: ${error.message}`);
     
-    // Check if this is a SoundCloud track that failed - check both ways to identify SoundCloud tracks
-    if ((track._isDirectStream && track._fromExternalSource && track._originalQuery?.includes('soundcloud.com')) ||
-        track._isSoundCloud) {
-        if (queue.metadata) {
-            queue.metadata.send({
-                content: `❌ | Failed to play track from SoundCloud: **${track.title}**. Error: ${error.message}`
-            });
-        }
-        return;
-    }
-    
-    // Check for YouTube extraction errors
-    if (error.message.includes("Could not extract stream") || 
+    // Handle all YouTube download-related errors, including from extractors
+    if (error.message.includes("Downloading of") || 
+        error.message.includes("download failed") ||
+        error.message.includes("Could not extract stream") || 
         error.message.includes("Status code: 410") || 
-        error.message.includes("Status code: 403")) {
-        
-        if (queue.metadata) {
-            queue.metadata.send({
-                content: `❌ | Could not play **${track.title}** due to YouTube restrictions.`
-            });
+        error.message.includes("Status code: 403") ||
+        // Handle additional potential errors from extractors
+        error.message.includes("No suitable format") ||
+        error.message.includes("This video is unavailable") ||
+        error.message.includes("Sign in to confirm your age") ||
+        error.message.includes("This video requires payment")) {
+    
+        // Check if this is a SoundCloud track that failed - check both ways to identify SoundCloud tracks
+        if ((track._isDirectStream && track._fromExternalSource && track._originalQuery?.includes('soundcloud.com')) ||
+            track._isSoundCloud) {
+            if (queue.metadata) {
+                queue.metadata.send({
+                    content: `❌ | Failed to play track from SoundCloud: **${track.title}**. Error: ${error.message}`
+                });
+            }
+            return;
         }
         
         // Get guild ID from the queue
@@ -211,44 +242,100 @@ player.events.on("playerError", (queue, error, track) => {
                     
                     // Small delay to ensure messages appear in correct order
                     setTimeout(() => {
-                        queue.node.play(fallbackTrack)
-                            .catch(fallbackError => {
-                                console.error(`Error playing fallback track: ${fallbackError.message}`);
-                                
-                                // If there are more fallbacks, try the next one
-                                if (fallbackTracks.length > 0) {
-                                    const nextFallback = fallbackTracks.shift();
-                                    nextFallback._fallbackAttempt = true;
-                                    nextFallback._fallbackAttemptNumber = 3;
+                        try {
+                            queue.node.play(fallbackTrack)
+                                .catch(fallbackError => {
+                                    console.error(`Error playing fallback track: ${fallbackError.message}`);
                                     
-                                    if (queue.metadata) {
-                                        queue.metadata.send({
-                                            content: `▶️ | Previous alternative failed too. Trying alternative (3/3): **${nextFallback.title}**`
-                                        });
-                                    }
-                                    
-                                    queue.node.play(nextFallback)
-                                        .catch(lastError => {
-                                            console.error(`Error playing last fallback track: ${lastError.message}`);
+                                    // If there are more fallbacks, try the next one
+                                    if (fallbackTracks.length > 0) {
+                                        const nextFallback = fallbackTracks.shift();
+                                        nextFallback._fallbackAttempt = true;
+                                        nextFallback._fallbackAttemptNumber = 3;
+                                        
+                                        if (queue.metadata) {
+                                            queue.metadata.send({
+                                                content: `▶️ | Previous alternative failed too. Trying alternative (3/3): **${nextFallback.title}**`
+                                            });
+                                        }
+                                        
+                                        try {
+                                            queue.node.play(nextFallback)
+                                                .catch(lastError => {
+                                                    console.error(`Error playing last fallback track: ${lastError.message}`);
+                                                    queue._handlingFallback = false;
+                                                    
+                                                    if (queue.metadata) {
+                                                        queue.metadata.send({
+                                                            content: `❌ | All alternative tracks failed due to YouTube restrictions. Please try a different search query like "${track.title} lyrics" or "${track.title} audio".`
+                                                        });
+                                                    }
+                                                });
+                                        } catch (err) {
+                                            console.error(`Exception during queue.node.play for nextFallback: ${err.message}`);
                                             queue._handlingFallback = false;
                                             
                                             if (queue.metadata) {
                                                 queue.metadata.send({
-                                                    content: `❌ | All alternative tracks failed due to YouTube restrictions. Please try a different search query like "${track.title} lyrics" or "${track.title} audio".`
+                                                    content: `❌ | Error during fallback: ${err.message}. Please try a different search query.`
+                                                });
+                                            }
+                                        }
+                                    } else {
+                                        // No more fallbacks
+                                        queue._handlingFallback = false;
+                                        
+                                        if (queue.metadata) {
+                                            queue.metadata.send({
+                                                content: `❌ | All alternative tracks failed due to YouTube restrictions. Please try a different search query like "${track.title} lyrics" or "${track.title} audio".`
+                                            });
+                                        }
+                                    }
+                                });
+                        } catch (outerError) {
+                            console.error(`Exception during queue.node.play for fallbackTrack: ${outerError.message}`);
+                            queue._handlingFallback = false;
+                            
+                            // Try to recover by playing the next fallback if available
+                            if (fallbackTracks.length > 0) {
+                                const nextFallback = fallbackTracks.shift();
+                                
+                                if (queue.metadata) {
+                                    queue.metadata.send({
+                                        content: `❌ | Error during first fallback. Trying next alternative: **${nextFallback.title}**`
+                                    });
+                                }
+                                
+                                try {
+                                    queue.node.play(nextFallback)
+                                        .catch(e => {
+                                            console.error(`Error playing recovery fallback: ${e.message}`);
+                                            queue._handlingFallback = false;
+                                            
+                                            if (queue.metadata) {
+                                                queue.metadata.send({
+                                                    content: `❌ | All alternatives failed. Please try a different search query.`
                                                 });
                                             }
                                         });
-                                } else {
-                                    // No more fallbacks
+                                } catch (err) {
+                                    console.error(`Exception during recovery play: ${err.message}`);
                                     queue._handlingFallback = false;
                                     
                                     if (queue.metadata) {
                                         queue.metadata.send({
-                                            content: `❌ | All alternative tracks failed due to YouTube restrictions. Please try a different search query like "${track.title} lyrics" or "${track.title} audio".`
+                                            content: `❌ | Error during fallback: ${err.message}. Please try a different search query.`
                                         });
                                     }
                                 }
-                            });
+                            } else {
+                                if (queue.metadata) {
+                                    queue.metadata.send({
+                                        content: `❌ | Error during fallback and no more alternatives available. Please try a different search query.`
+                                    });
+                                }
+                            }
+                        }
                     }, 1000);
                     
                     return;
