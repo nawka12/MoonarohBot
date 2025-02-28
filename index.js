@@ -20,6 +20,16 @@ process.on('uncaughtException', (error) => {
         )) {
             console.log('Caught YouTube download error at process level');
             
+            // Check if it might be an IP block
+            if (error.message.includes("status code: 403") || 
+                error.message.includes("status code: 429") ||
+                error.message.includes("Status code: 403") ||
+                error.message.includes("Status code: 429")) {
+                console.log('Possible YouTube IP block detected');
+                // Note: We cannot access Discord channels from this global context
+                // We just log it here - the playerError handler will handle notification
+            }
+            
             // Don't do anything else - this prevents the app from crashing
             // The error has been logged, which is sufficient
         }
@@ -43,6 +53,18 @@ process.on('unhandledRejection', (reason, promise) => {
         )) {
             console.log('Caught YouTube download error (promise rejection) at process level');
             
+            // Check if it might be an IP block
+            if (reason.message.includes("status code: 403") || 
+                reason.message.includes("status code: 429") ||
+                reason.message.includes("Status code: 403") ||
+                reason.message.includes("Status code: 429")) {
+                console.log('Possible YouTube IP block detected in promise rejection');
+                
+                // We'll use a global flag to indicate IP blocking was detected
+                // This will be checked by any active queue handlers
+                global.isYouTubeIpBlocked = true;
+            }
+            
             // Don't do anything else - this prevents the app from crashing
             // The error has been logged, which is sufficient
         }
@@ -52,6 +74,9 @@ process.on('unhandledRejection', (reason, promise) => {
     
     // Don't exit the process
 });
+
+// Global flag to track if we've detected an IP block
+global.isYouTubeIpBlocked = false;
 
 // Global fallback tracks storage by guild ID
 const fallbackTracksMap = new Map();
@@ -246,12 +271,78 @@ player.events.on("error", (queue, error) => {
 player.events.on("playerError", (queue, error, track) => {
     console.log(`[${queue.guild.name}] Error emitted from the player while playing ${track.title}: ${error.message}`);
     
+    // Helper function to check if we're being IP blocked by YouTube
+    const checkForIpBlock = (errorMessage) => {
+        // Check common signs of IP blocking
+        const ipBlockSigns = [
+            "status code: 403",
+            "Status code: 403",
+            "status code: 429", 
+            "Status code: 429",
+            "Too many requests",
+            "Access denied"
+        ];
+        
+        return ipBlockSigns.some(sign => errorMessage.includes(sign)) || global.isYouTubeIpBlocked;
+    };
+    
+    // Handle IP blocking specifically
+    if (checkForIpBlock(error.message)) {
+        console.log(`[${queue.guild.name}] Detected YouTube IP blocking during playback`);
+        
+        if (queue.metadata) {
+            queue.metadata.send({
+                content: `⛔ | **YouTube has blocked our server's IP address.** The bot will now disconnect to prevent further errors. Please try again later or try a different source like Spotify or SoundCloud.`
+            });
+            
+            // Destroy the queue after a short delay to allow the message to be sent
+            setTimeout(() => {
+                try {
+                    if (queue.connection) {
+                        queue.connection.disconnect();
+                    }
+                    queue.delete();
+                    console.log(`[${queue.guild.name}] Queue destroyed due to YouTube IP block`);
+                } catch (disconnectError) {
+                    console.error(`Error disconnecting after IP block: ${disconnectError.message}`);
+                }
+                
+                // Reset the IP block flag after handling it in this guild
+                global.isYouTubeIpBlocked = false;
+            }, 500);
+            
+            return;
+        }
+    }
+    
     // Utility function to safely play a track and handle errors
     const safeNodePlay = async (trackToPlay) => {
         try {
             return await queue.node.play(trackToPlay);
         } catch (err) {
             console.error(`Safe node play caught error: ${err.message}`);
+            
+            // Check for IP blocking here too
+            if (checkForIpBlock(err.message)) {
+                if (queue.metadata) {
+                    queue.metadata.send({
+                        content: `⛔ | **YouTube has blocked our server's IP address.** The bot will now disconnect to prevent further errors. Please try again later or try a different source like Spotify or SoundCloud.`
+                    });
+                    
+                    // Clean up the queue
+                    setTimeout(() => {
+                        try {
+                            if (queue.connection) {
+                                queue.connection.disconnect();
+                            }
+                            queue.delete();
+                        } catch (e) {
+                            console.error(`Error disconnecting in safeNodePlay: ${e.message}`);
+                        }
+                    }, 500);
+                }
+                return null;
+            }
             
             // Don't throw, just return null to indicate failure
             return null;

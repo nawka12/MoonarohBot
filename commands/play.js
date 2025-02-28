@@ -237,12 +237,58 @@ module.exports = {
                 console.error("Error: fallbackTracksMap not available on player");
             }
 
+            // Helper function to check if we're being IP blocked by YouTube
+            const checkForIpBlock = (errorMessage) => {
+                // Check common signs of IP blocking
+                const ipBlockSigns = [
+                    "status code: 403",
+                    "Status code: 403",
+                    "status code: 429", 
+                    "Status code: 429",
+                    "Too many requests",
+                    "Access denied"
+                ];
+                
+                return ipBlockSigns.some(sign => errorMessage.includes(sign)) || global.isYouTubeIpBlocked;
+            };
+
             // Create a safer wrapper for player.play
             const safePlay = async (voiceChannel, track, options) => {
                 try {
                     return await player.play(voiceChannel, track, options);
                 } catch (error) {
                     console.error(`Safe play wrapper caught error: ${error.message}`);
+                    
+                    // Check if this is an IP blocking error
+                    if (checkForIpBlock(error.message)) {
+                        console.log(`[${interaction.guild.name}] Detected YouTube IP blocking in safePlay`);
+                        
+                        // Set the global flag to notify other components
+                        global.isYouTubeIpBlocked = true;
+                        
+                        await interaction.channel.send({
+                            content: `⛔ | **YouTube has blocked our server's IP address.** The bot will now disconnect to prevent further errors. Please try again later or try a different source like Spotify or SoundCloud.`
+                        });
+                        
+                        // Clean up any existing queue
+                        const queue = player.nodes.get(interaction.guild.id);
+                        if (queue) {
+                            setTimeout(() => {
+                                try {
+                                    if (queue.connection) {
+                                        queue.connection.disconnect();
+                                    }
+                                    queue.delete();
+                                    console.log(`[${interaction.guild.name}] Queue destroyed due to YouTube IP block`);
+                                } catch (e) {
+                                    console.error(`Error disconnecting after IP block: ${e.message}`);
+                                }
+                            }, 500);
+                        }
+                        
+                        // Rethrow a modified error
+                        throw new Error("YouTube IP blocked");
+                    }
                     
                     // Check if this is a YouTube download error
                     if (error.message.includes("Downloading of") || 
