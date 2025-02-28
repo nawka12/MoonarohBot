@@ -274,7 +274,14 @@ module.exports = {
                     }
                 }
             } catch (playError) {
+                // Check if this is a YouTube download error
+                const isYouTubeDownloadError = playError.message && (
+                    playError.message.includes("Downloading of") ||
+                    playError.message.includes("download failed")
+                );
+                
                 console.error(`Error playing first track: ${playError.message}`);
+                console.log(`Is YouTube download error: ${isYouTubeDownloadError}`);
                 
                 // Mark that we attempted this track
                 if (topTracks[0] && topTracks[0].url) {
@@ -306,9 +313,16 @@ module.exports = {
                         player.attemptedTracksSet.get(guildId).add(fallbackTrack.url);
                     }
                     
-                    await interaction.channel.send({ 
-                        content: `❌ | First track failed immediately. Trying alternative (2/3): **${fallbackTrack.title}**` 
-                    });
+                    // Custom message for YouTube download errors
+                    if (isYouTubeDownloadError) {
+                        await interaction.channel.send({ 
+                            content: `❌ | Could not download the track due to YouTube restrictions. Trying alternative (2/3): **${fallbackTrack.title}**` 
+                        });
+                    } else {
+                        await interaction.channel.send({ 
+                            content: `❌ | First track failed immediately. Trying alternative (2/3): **${fallbackTrack.title}**` 
+                        });
+                    }
                     
                     try {
                         const fallbackResult = await player.play(
@@ -325,7 +339,13 @@ module.exports = {
                             // We'll let the playerStart event handle the success message
                         }
                     } catch (fallbackError) {
+                        const isFallbackDownloadError = fallbackError.message && (
+                            fallbackError.message.includes("Downloading of") ||
+                            fallbackError.message.includes("download failed")
+                        );
+                        
                         console.error(`Error playing fallback track: ${fallbackError.message}`);
+                        console.log(`Is fallback YouTube download error: ${isFallbackDownloadError}`);
                         
                         // Check if we're hitting the maximum attempts limit
                         const attemptCount = player.attemptedTracksSet.get(guildId).size;
@@ -348,9 +368,16 @@ module.exports = {
                                 player.attemptedTracksSet.get(guildId).add(lastTrack.url);
                             }
                             
-                            await interaction.channel.send({ 
-                                content: `❌ | Second track failed too. Trying alternative (3/3): **${lastTrack.title}**` 
-                            });
+                            // Custom message for YouTube download errors
+                            if (isFallbackDownloadError) {
+                                await interaction.channel.send({ 
+                                    content: `❌ | Could not download the second track due to YouTube restrictions. Trying final alternative (3/3): **${lastTrack.title}**` 
+                                });
+                            } else {
+                                await interaction.channel.send({ 
+                                    content: `❌ | Second track failed too. Trying alternative (3/3): **${lastTrack.title}**` 
+                                });
+                            }
                             
                             try {
                                 // Mark the track as the fallback
@@ -369,7 +396,13 @@ module.exports = {
                                     lastResult.track._fallbackAttemptNumber = 3;
                                 }
                             } catch (lastError) {
+                                const isLastDownloadError = lastError.message && (
+                                    lastError.message.includes("Downloading of") ||
+                                    lastError.message.includes("download failed")
+                                );
+                                
                                 console.error(`Error playing last track: ${lastError.message}`);
+                                console.log(`Is last track YouTube download error: ${isLastDownloadError}`);
                                 
                                 // Check if we're hitting the maximum attempts limit
                                 const attemptCount = player.attemptedTracksSet.get(guildId).size;
@@ -447,9 +480,16 @@ module.exports = {
                                         player.attemptedTracksSet.set(guildId, new Set());
                                     }
                                 } else {
-                                    await interaction.channel.send({ 
-                                        content: `❌ | All tracks failed. Please try a different search query.` 
-                                    });
+                                    // Custom message for YouTube download errors
+                                    if (isLastDownloadError) {
+                                        await interaction.channel.send({ 
+                                            content: `❌ | All tracks failed due to YouTube download restrictions. Please try a different song or artist.` 
+                                        });
+                                    } else {
+                                        await interaction.channel.send({ 
+                                            content: `❌ | All tracks failed. Please try a different search query.` 
+                                        });
+                                    }
                                     
                                     // Reset tracking
                                     player.attemptedTracksSet.set(guildId, new Set());
@@ -595,14 +635,16 @@ module.exports = {
                 player.attemptedTracksSet.set(guildId, new Set());
             }
             
-            // Check if it's a YouTube extraction error
+            // Check if it's a download error from YouTube
             if (error.message && (
+                error.message.includes("Downloading of") ||
+                error.message.includes("download failed") ||
                 error.message.includes("Could not extract stream") || 
                 error.message.includes("Status code: 410") || 
                 error.message.includes("Status code: 403")
             )) {
                 return interaction.followUp({ 
-                    content: "❌ | Could not play any of the top results due to YouTube restrictions. Try searching for a lyrics or audio version instead."
+                    content: "❌ | Could not play any of the tracks due to YouTube download restrictions. Try searching for a lyrics or audio version instead."
                 });
             }
             
