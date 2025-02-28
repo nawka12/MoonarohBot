@@ -80,9 +80,9 @@ module.exports = {
             const nodeOptions = {
                 metadata: interaction.channel,
                 leaveOnEmpty: true,
-                leaveOnEmptyCooldown: 5000, // 5 seconds delay before leaving
+                leaveOnEmptyCooldown: 1000, // 1 second delay before leaving
                 leaveOnEnd: true,
-                leaveOnEndCooldown: 300000, // 5 minutes
+                leaveOnEndCooldown: 30000, // 30 second delay before leaving
             };
 
             // Play the first track
