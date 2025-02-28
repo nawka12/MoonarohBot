@@ -93,17 +93,13 @@ module.exports = {
                 
                 console.log(`Play result: ${result ? "success" : "failed"}`);
                 
+                // We'll let the playerStart event handle the "Now playing" message
+                // This prevents duplicate messages when fallbacks are used
+                
+                // Store information that we've started this track
                 if (result && result.track) {
-                    // Let users know about the track being played
-                    if (isDirectLink) {
-                        await interaction.channel.send({ 
-                            content: `🎶 | Now playing: **${result.track.title}**` 
-                        });
-                    } else {
-                        await interaction.channel.send({ 
-                            content: `🎶 | Now playing (1/3): **${result.track.title}**` 
-                        });
-                    }
+                    // Add a property to track that this was the initial track
+                    result.track._initialTrack = true;
                 }
             } catch (playError) {
                 console.error(`Error playing first track: ${playError.message}`);
@@ -154,9 +150,7 @@ module.exports = {
                             fallbackResult.track._fallbackAttempt = true;
                             fallbackResult.track._fallbackAttemptNumber = 2;
                             
-                            await interaction.channel.send({ 
-                                content: `🎶 | Now playing alternative (2/3): **${fallbackResult.track.title}**` 
-                            });
+                            // We'll let the playerStart event handle the success message
                         }
                     } catch (fallbackError) {
                         console.error(`Error playing fallback track: ${fallbackError.message}`);
@@ -198,9 +192,9 @@ module.exports = {
                                 );
                                 
                                 if (lastResult && lastResult.track) {
-                                    await interaction.channel.send({ 
-                                        content: `🎶 | Now playing last alternative: **${lastResult.track.title}**` 
-                                    });
+                                    // We'll let the playerStart event handle the success message
+                                    lastResult.track._fallbackAttempt = true;
+                                    lastResult.track._fallbackAttemptNumber = 3;
                                 }
                             } catch (lastError) {
                                 console.error(`Error playing last track: ${lastError.message}`);
@@ -252,9 +246,8 @@ module.exports = {
                                                 );
                                                 
                                                 if (altResult && altResult.track) {
-                                                    await interaction.channel.send({ 
-                                                        content: `🎶 | Now playing: **${altResult.track.title}**` 
-                                                    });
+                                                    // We'll let the playerStart event handle the success message
+                                                    altResult.track._fallbackAttempt = true;
                                                 }
                                             } else {
                                                 await interaction.channel.send({ 
@@ -325,9 +318,8 @@ module.exports = {
                                         );
                                         
                                         if (altResult && altResult.track) {
-                                            await interaction.channel.send({ 
-                                                content: `🎶 | Now playing: **${altResult.track.title}**` 
-                                            });
+                                            // We'll let the playerStart event handle the success message
+                                            altResult.track._fallbackAttempt = true;
                                         }
                                     } else {
                                         await interaction.channel.send({ 
@@ -391,9 +383,8 @@ module.exports = {
                                 );
                                 
                                 if (altResult && altResult.track) {
-                                    await interaction.channel.send({ 
-                                        content: `🎶 | Now playing: **${altResult.track.title}**` 
-                                    });
+                                    // We'll let the playerStart event handle the success message
+                                    altResult.track._fallbackAttempt = true;
                                 }
                             } else {
                                 await interaction.channel.send({ 

@@ -358,20 +358,34 @@ player.events.on("playerError", (queue, error, track) => {
 });
 
 player.events.on("playerStart", (queue, track) => {
-    // Only send the "Started playing" message for tracks that aren't the first attempt
-    // For fallback tracks, we show a different message with "Trying alternative" already
-    if (track._fallbackAttemptNumber) {
-        if (queue.metadata) {
+    // Centralize all "Now playing" messages in this event handler
+    // This prevents duplicate or conflicting messages
+    
+    if (queue.metadata) {
+        // If this is a fallback track with a fallback attempt number
+        if (track._fallbackAttempt && track._fallbackAttemptNumber) {
             queue.metadata.send(`✅ | Successfully playing alternative (${track._fallbackAttemptNumber}/3): **${track.title}** in **${queue.channel.name}**!`);
         }
-    } else if (queue.metadata) {
-        queue.metadata.send(`🎶 | Started playing: **${track.title}** in **${queue.channel.name}**!`);
+        // If this is a fallback track without a number (from title search)
+        else if (track._fallbackAttempt) {
+            queue.metadata.send(`✅ | Successfully playing alternative: **${track.title}** in **${queue.channel.name}**!`);
+        }
+        // This is the initial track that was requested
+        else {
+            queue.metadata.send(`🎶 | Started playing: **${track.title}** in **${queue.channel.name}**!`);
+        }
     }
 });
 
 player.events.on("audioTrackAdd", (queue, track) => {
-    // Don't send the "queued" message when it's our fallback attempt
-    if (!track._fallbackAttempt && !track.wasAutoSelected && queue.metadata) {
+    // Only send queued message for tracks that:
+    // 1. Aren't fallback attempts (we handle those differently)
+    // 2. Weren't auto-selected by the player
+    // 3. Aren't about to be played immediately (we'll show "Now playing" instead)
+    if (!track._fallbackAttempt && 
+        !track.wasAutoSelected && 
+        queue.tracks.size > 0 && // Only if there are already tracks in the queue
+        queue.metadata) {
         queue.metadata.send(`🎶 | Track **${track.title}** queued!`);
     }
 });
