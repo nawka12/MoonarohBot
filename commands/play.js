@@ -52,13 +52,21 @@ module.exports = {
                 // For SoundCloud tracks
                 if (canStreamDirectly && query.includes('soundcloud.com')) {
                     await interaction.followUp({ 
-                        content: `✅ | Found "${extractedTrack.title}" from SoundCloud\n▶️ | Playing directly via SoundCloud...` 
+                        content: `✅ | Found track: "${extractedTrack.title}"\n▶️ | Loading track...` 
                     });
                     
-                    console.log(`Playing track directly from SoundCloud: "${extractedTrack.title}"`);
+                    console.log(`Playing track from URL: "${extractedTrack.title}"`);
+                    
+                    // Mark all tracks in this result as direct SoundCloud streams
+                    externalResult.tracks.forEach(track => {
+                        track._isDirectStream = true;
+                        track._fromExternalSource = true;
+                        track._originalQuery = query;
+                        track._isSoundCloud = true;
+                    });
                     
                     // Process the result directly without YouTube search
-                    return this.processSearchResult(interaction, player, externalResult, query, extractedTrack.title, isExternalSource, true);
+                    return this.processSearchResult(interaction, player, externalResult, query, query, isExternalSource, true);
                 }
                 // For services that don't support streaming (Spotify, Apple Music)
                 else {
@@ -69,7 +77,7 @@ module.exports = {
                     }
                     
                     await interaction.followUp({ 
-                        content: `✅ | Found "${extractedTrack.title}" from ${query.includes('spotify.com') ? 'Spotify' : 'Apple Music'}\n🔍 | Searching YouTube for best match...` 
+                        content: `✅ | Found track: "${extractedTrack.title}"\n🔍 | Searching for best match...` 
                     });
                     
                     console.log(`Extracted track info: "${actualQuery}", now searching YouTube`);
@@ -135,6 +143,29 @@ module.exports = {
             // Store the top 3 tracks for fallback attempts (or just the one track for direct links)
             const topTracks = searchResult.tracks.slice(0, 3);
             
+            // Double-check if this is a SoundCloud track based on the original query
+            // This ensures we tag SoundCloud tracks correctly even if the flags weren't set earlier
+            if (originalQuery.includes('soundcloud.com')) {
+                console.log('Double-checking SoundCloud track tagging');
+                
+                // Ensure all tracks from SoundCloud are properly tagged
+                topTracks.forEach(track => {
+                    track._fromExternalSource = true;
+                    track._originalQuery = originalQuery;
+                    track._isSoundCloud = true;
+                    
+                    // Mark as direct stream if that flag was passed
+                    if (isDirectStreamSource) {
+                        track._isDirectStream = true;
+                    }
+                });
+                
+                // Force these flags for consistency
+                isExternalSource = true;
+                
+                console.log(`Tagged ${topTracks.length} tracks as SoundCloud tracks`);
+            }
+            
             // Debug the tracks found
             console.log(`Found ${topTracks.length} tracks for "${actualQuery}":`);
             topTracks.forEach((t, i) => {
@@ -148,15 +179,32 @@ module.exports = {
             if (isExternalSource) {
                 // Direct streaming source like SoundCloud
                 if (isDirectStreamSource) {
+                    // Check if any track is marked as SoundCloud
+                    const isSoundCloud = topTracks.length > 0 && topTracks[0]._isSoundCloud;
+                    
+                    console.log(`Processing direct stream source. isSoundCloud: ${isSoundCloud}, originalQuery: ${originalQuery}`);
+                    console.log(`Track flags: _isSoundCloud=${topTracks[0]._isSoundCloud}, _isDirectStream=${topTracks[0]._isDirectStream}, _fromExternalSource=${topTracks[0]._fromExternalSource}`);
+                    
                     await interaction.followUp({ 
-                        content: `⏱ | Starting playback directly from SoundCloud: **${topTracks[0].title}**` 
+                        content: `⏱ | Loading track: **${topTracks[0].title}**` 
                     });
                 }
                 // External source requiring YouTube (Spotify, Apple Music)
                 else {
-                    await interaction.followUp({ 
-                        content: `⏱ | Found ${topTracks.length} YouTube matches for "${actualQuery}".\nPlaying the best match.` 
-                    });
+                    // Check if the original query is from SoundCloud even though it's not marked as direct stream
+                    // This is a fallback in case the direct stream flag isn't properly set
+                    if (originalQuery.includes('soundcloud.com')) {
+                        console.log(`SoundCloud URL detected but not marked as direct stream.`);
+                        console.log(`Track flags: _isSoundCloud=${topTracks[0]._isSoundCloud}, _isDirectStream=${topTracks[0]._isDirectStream}, _fromExternalSource=${topTracks[0]._fromExternalSource}`);
+                        
+                        await interaction.followUp({ 
+                            content: `⏱ | Loading track: **${topTracks[0].title}**` 
+                        });
+                    } else {
+                        await interaction.followUp({ 
+                            content: `⏱ | Found ${topTracks.length} matches for "${actualQuery}".\nPlaying the best match.` 
+                        });
+                    }
                 }
             } else if (isDirectLink) {
                 await interaction.followUp({ 

@@ -127,8 +127,9 @@ player.events.on("error", (queue, error) => {
 player.events.on("playerError", (queue, error, track) => {
     console.log(`[${queue.guild.name}] Error emitted from the player while playing ${track.title}: ${error.message}`);
     
-    // Check if this is a SoundCloud track that failed
-    if (track._isDirectStream && track._fromExternalSource && track._originalQuery.includes('soundcloud.com')) {
+    // Check if this is a SoundCloud track that failed - check both ways to identify SoundCloud tracks
+    if ((track._isDirectStream && track._fromExternalSource && track._originalQuery?.includes('soundcloud.com')) ||
+        track._isSoundCloud) {
         if (queue.metadata) {
             queue.metadata.send({
                 content: `❌ | Failed to play track from SoundCloud: **${track.title}**. Error: ${error.message}`
@@ -372,33 +373,15 @@ player.events.on("playerStart", (queue, track) => {
     // This prevents duplicate or conflicting messages
     
     if (queue.metadata) {
-        // Direct streaming from SoundCloud
-        if (track._fromExternalSource && track._isDirectStream) {
-            queue.metadata.send(`🎶 | Now playing directly from SoundCloud: **${track.title}** in **${queue.channel.name}**!`);
-        }
-        // If this is a track from an external source (Spotify, Apple Music)
-        else if (track._fromExternalSource) {
-            // Determine the correct source based on the original query
-            let source = "Unknown Source";
-            if (track._originalQuery.includes('spotify.com')) {
-                source = 'Spotify';
-            } else if (track._originalQuery.includes('music.apple.com')) {
-                source = 'Apple Music';
-            } else if (track._originalQuery.includes('soundcloud.com')) {
-                source = 'SoundCloud';
-            }
-            
-            queue.metadata.send(`🎶 | Started playing: **${track.title}** (found via ${source}) in **${queue.channel.name}**!`);
-        }
         // If this is a fallback track with a fallback attempt number
-        else if (track._fallbackAttempt && track._fallbackAttemptNumber) {
+        if (track._fallbackAttempt && track._fallbackAttemptNumber) {
             queue.metadata.send(`✅ | Successfully playing alternative (${track._fallbackAttemptNumber}/3): **${track.title}** in **${queue.channel.name}**!`);
         }
         // If this is a fallback track without a number (from title search)
         else if (track._fallbackAttempt) {
             queue.metadata.send(`✅ | Successfully playing alternative: **${track.title}** in **${queue.channel.name}**!`);
         }
-        // This is the initial track that was requested
+        // Standard message for all other tracks
         else {
             queue.metadata.send(`🎶 | Started playing: **${track.title}** in **${queue.channel.name}**!`);
         }
