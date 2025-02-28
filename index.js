@@ -14,6 +14,50 @@ const fallbackTracksMap = new Map();
 // Global set to track attempted track URLs to prevent infinite loops
 const attemptedTracksSet = new Map();
 
+// Add a variable to track the last failed track URL
+let lastFailedUrl = null;
+
+// Add a global uncaught exception handler to prevent crashes from YouTube download errors
+process.on('uncaughtException', (error) => {
+    console.error('Uncaught Exception:', error.message);
+    
+    // Check if this is a YouTube download error
+    if (error.message.includes("Downloading of") && error.message.includes("failed")) {
+        console.warn('YouTube download error caught at process level. This is likely due to IP blocking.');
+        
+        // Extract the URL from the error message
+        const urlMatch = error.message.match(/Downloading of (https:\/\/.*?) failed/);
+        const url = urlMatch ? urlMatch[1] : null;
+        
+        // Increment the consecutive failed downloads counter
+        consectuiveFailedDownloads++;
+        
+        // If we have too many failures in a row, mark as IP block issue
+        if (consectuiveFailedDownloads >= 2) {
+            ipBlockIssuesDetected = true;
+            // Try to reset connections immediately
+            resetConnectionPool();
+        }
+        
+        if (url) {
+            console.log('Failed YouTube URL:', url);
+            // Store the last failed URL so the player events can access it
+            lastFailedUrl = url;
+            
+            // Since we're at process level, we don't have access to the player or queue context
+            // We can only log the error and let the player event handlers deal with it if possible
+            console.log('The bot will continue running and try alternative tracks if available.');
+        }
+        
+        // We don't rethrow the error, allowing the process to continue
+        return;
+    }
+    
+    // For other types of uncaught exceptions, we might want to crash
+    // depending on how critical they are, but for now let's just log them
+    console.error('Non-YouTube uncaught exception:', error.stack);
+});
+
 // Make sure TOKEN exists in environment
 console.log('TOKEN exists:', !!process.env.TOKEN);
 
@@ -104,6 +148,16 @@ async function setupExtractors() {
             retryOptions: {
                 maxRetries: 3,
                 retryDelay: 1000
+            },
+            // Try different HTTP client modes to work around IP blocks
+            requestOptions: {
+                // These options help bypass some restrictions
+                headers: {
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36',
+                    'Accept-Language': 'en-US,en;q=0.9'
+                },
+                // Rotate user agent periodically
+                rotateUserAgent: true
             }
         });
         
@@ -118,6 +172,46 @@ async function setupExtractors() {
 }
 
 setupExtractors();
+
+// Set a flag to track if we're experiencing IP block issues
+let ipBlockIssuesDetected = false;
+let consectuiveFailedDownloads = 0;
+
+// Create a function to clear HTTP agent pools (helps with IP blocks)
+async function resetConnectionPool() {
+    try {
+        // This is a hack to help bypass IP blocks by forcing new connections
+        console.log('Resetting HTTP connection pool to help bypass IP blocks...');
+        
+        // Try to access the underlying HTTP agent if possible
+        if (player.extractors) {
+            const ytExtractor = player.extractors.get('youtubei');
+            if (ytExtractor?._innertube?._httpClient) {
+                console.log('Clearing agent connection pool for YouTube extractor');
+                // Force the agent to create new connections
+                ytExtractor._innertube._httpClient.defaults.agent = null;
+            }
+        }
+        
+        // If we're experiencing IP blocks, try reloading extractors
+        if (ipBlockIssuesDetected) {
+            console.log('IP block issues detected, reloading extractors...');
+            await setupExtractors();
+            ipBlockIssuesDetected = false;
+            consectuiveFailedDownloads = 0;
+        }
+    } catch (error) {
+        console.error('Error resetting connection pool:', error);
+    }
+}
+
+// Periodically reset the connection pool if we're having issues
+setInterval(() => {
+    if (consectuiveFailedDownloads >= 2) {
+        ipBlockIssuesDetected = true;
+        resetConnectionPool();
+    }
+}, 60000); // Check every minute
 
 // Set up player events
 player.events.on("error", (queue, error) => {
@@ -163,6 +257,33 @@ player.events.on("playerError", (queue, error, track) => {
         player.attemptedTracksSet.get(guildId).add(track.url);
         
         // Continue with the same fallback logic as for other YouTube errors
+        handleYoutubeRestrictions(queue, track, guildId);
+        return;
+    }
+    
+    // Check if we recently had an uncaught download error that was caught by the process handler
+    if (lastFailedUrl && track.url && track.url.includes("youtube.com")) {
+        console.log(`[${queue.guild.name}] Processing uncaught download error for ${track.title}`);
+        
+        if (queue.metadata) {
+            queue.metadata.send({
+                content: `❌ | Failed to download **${track.title}** due to YouTube IP restrictions. Trying alternatives...`
+            });
+        }
+        
+        // Get guild ID from the queue
+        const guildId = queue.guild.id;
+        
+        // Track the attempted URL to prevent infinite loops
+        if (!player.attemptedTracksSet.has(guildId)) {
+            player.attemptedTracksSet.set(guildId, new Set());
+        }
+        player.attemptedTracksSet.get(guildId).add(track.url);
+        
+        // Reset the last failed URL
+        lastFailedUrl = null;
+        
+        // Continue with the fallback logic
         handleYoutubeRestrictions(queue, track, guildId);
         return;
     }
