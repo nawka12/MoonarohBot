@@ -424,4 +424,34 @@ client.on("interactionCreate", async (interaction) => {
     }
 });
 
+// Listen for users leaving voice channels
+client.on("voiceStateUpdate", (oldState, newState) => {
+    // Check if a user has left a voice channel
+    if (oldState.channelId && !newState.channelId) {
+        const guild = oldState.guild;
+        const channel = oldState.channel;
+        
+        // If the bot is in a voice channel in this guild
+        if (guild.members.me.voice.channel) {
+            const botVoiceChannel = guild.members.me.voice.channel;
+            
+            // Get current queue for this guild
+            const queue = player.nodes.get(guild.id);
+            
+            // Check if the bot is the only one left in the voice channel
+            if (botVoiceChannel.members.size === 1 && queue && queue.isPlaying()) {
+                // Get the text channel associated with the player
+                const textChannel = queue.metadata;
+                
+                if (textChannel) {
+                    textChannel.send("👋 | No one in voice channel, leaving...");
+                    
+                    // We don't need to manually disconnect as leaveOnEmpty is set to true
+                    // The bot will automatically leave due to the leaveOnEmpty setting
+                }
+            }
+        }
+    }
+});
+
 client.login(process.env.TOKEN);

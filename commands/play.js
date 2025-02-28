@@ -80,7 +80,7 @@ module.exports = {
             const nodeOptions = {
                 metadata: interaction.channel,
                 leaveOnEmpty: true,
-                // leaveOnEmptyCooldown: 300000, // 5 minutes
+                leaveOnEmptyCooldown: 5000, // 5 seconds delay before leaving
                 leaveOnEnd: true,
                 leaveOnEndCooldown: 300000, // 5 minutes
             };
