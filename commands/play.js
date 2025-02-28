@@ -277,7 +277,10 @@ module.exports = {
                 // Check if this is a YouTube download error
                 const isYouTubeDownloadError = playError.message && (
                     playError.message.includes("Downloading of") ||
-                    playError.message.includes("download failed")
+                    playError.message.includes("download failed") ||
+                    playError.message.includes("Could not extract stream") || 
+                    playError.message.includes("Status code: 410") || 
+                    playError.message.includes("Status code: 403")
                 );
                 
                 console.error(`Error playing first track: ${playError.message}`);
@@ -341,7 +344,10 @@ module.exports = {
                     } catch (fallbackError) {
                         const isFallbackDownloadError = fallbackError.message && (
                             fallbackError.message.includes("Downloading of") ||
-                            fallbackError.message.includes("download failed")
+                            fallbackError.message.includes("download failed") ||
+                            fallbackError.message.includes("Could not extract stream") || 
+                            fallbackError.message.includes("Status code: 410") || 
+                            fallbackError.message.includes("Status code: 403")
                         );
                         
                         console.error(`Error playing fallback track: ${fallbackError.message}`);
@@ -398,7 +404,10 @@ module.exports = {
                             } catch (lastError) {
                                 const isLastDownloadError = lastError.message && (
                                     lastError.message.includes("Downloading of") ||
-                                    lastError.message.includes("download failed")
+                                    lastError.message.includes("download failed") ||
+                                    lastError.message.includes("Could not extract stream") || 
+                                    lastError.message.includes("Status code: 410") || 
+                                    lastError.message.includes("Status code: 403")
                                 );
                                 
                                 console.error(`Error playing last track: ${lastError.message}`);
