@@ -237,15 +237,30 @@ module.exports = {
                 console.error("Error: fallbackTracksMap not available on player");
             }
 
-            // Basic nodeOptions for the player
-            const nodeOptions = {
-                metadata: interaction.channel,
-                leaveOnEmpty: true,
-                leaveOnEmptyCooldown: 1000, // 1 second delay before leaving
-                leaveOnEnd: true,
-                leaveOnEndCooldown: 30000, // 30 second delay before leaving
+            // Create a safer wrapper for player.play
+            const safePlay = async (voiceChannel, track, options) => {
+                try {
+                    return await player.play(voiceChannel, track, options);
+                } catch (error) {
+                    console.error(`Safe play wrapper caught error: ${error.message}`);
+                    
+                    // Check if this is a YouTube download error
+                    if (error.message.includes("Downloading of") || 
+                        error.message.includes("download failed") ||
+                        error.message.includes("Could not extract stream") || 
+                        error.message.includes("Status code: 410") || 
+                        error.message.includes("Status code: 403")) {
+                        
+                        // Create a more specific error that we already handle
+                        const enhancedError = new Error(`Could not download YouTube track: ${error.message}`);
+                        throw enhancedError;
+                    }
+                    
+                    // Rethrow other errors
+                    throw error;
+                }
             };
-
+            
             // Add a handler to catch download errors early
             const handleTrackError = async (track, errorMessage, attemptNumber = 1) => {
                 console.log(`Track error handler called: ${errorMessage} (attempt: ${attemptNumber})`);
@@ -275,7 +290,16 @@ module.exports = {
                             fallbackTrack._fallbackAttempt = true;
                             fallbackTrack._fallbackAttemptNumber = attemptNumber + 1;
                             
-                            const result = await player.play(
+                            const nodeOptions = {
+                                metadata: interaction.channel,
+                                leaveOnEmpty: true,
+                                leaveOnEmptyCooldown: 1000, // 1 second delay before leaving
+                                leaveOnEnd: true,
+                                leaveOnEndCooldown: 30000, // 30 second delay before leaving
+                            };
+                            
+                            // Use the safer play method
+                            const result = await safePlay(
                                 interaction.member.voice.channel,
                                 fallbackTrack,
                                 { nodeOptions }
@@ -303,8 +327,14 @@ module.exports = {
 
             // Play the first track
             try {
-                const result = await player.play(interaction.member.voice.channel, topTracks[0], {
-                    nodeOptions: nodeOptions,
+                const result = await safePlay(interaction.member.voice.channel, topTracks[0], {
+                    nodeOptions: {
+                        metadata: interaction.channel,
+                        leaveOnEmpty: true,
+                        leaveOnEmptyCooldown: 1000, // 1 second delay before leaving
+                        leaveOnEnd: true,
+                        leaveOnEndCooldown: 30000, // 30 second delay before leaving
+                    },
                     // Add enhanced error handling
                     onError: (error) => {
                         console.error(`Error in player.play handler: ${error.message}`);
@@ -401,10 +431,16 @@ module.exports = {
                     }
                     
                     try {
-                        const fallbackResult = await player.play(
+                        const fallbackResult = await safePlay(
                             interaction.member.voice.channel,
                             fallbackTrack,
-                            { nodeOptions }
+                            { nodeOptions: {
+                                metadata: interaction.channel,
+                                leaveOnEmpty: true,
+                                leaveOnEmptyCooldown: 1000, // 1 second delay before leaving
+                                leaveOnEnd: true,
+                                leaveOnEndCooldown: 30000, // 30 second delay before leaving
+                            } }
                         );
                         
                         if (fallbackResult && fallbackResult.track) {
@@ -463,10 +499,16 @@ module.exports = {
                                 lastTrack._fallbackAttempt = true;
                                 lastTrack._fallbackAttemptNumber = 3;
                                 
-                                const lastResult = await player.play(
+                                const lastResult = await safePlay(
                                     interaction.member.voice.channel,
                                     lastTrack,
-                                    { nodeOptions }
+                                    { nodeOptions: {
+                                        metadata: interaction.channel,
+                                        leaveOnEmpty: true,
+                                        leaveOnEmptyCooldown: 1000, // 1 second delay before leaving
+                                        leaveOnEnd: true,
+                                        leaveOnEndCooldown: 30000, // 30 second delay before leaving
+                                    } }
                                 );
                                 
                                 if (lastResult && lastResult.track) {
@@ -526,10 +568,16 @@ module.exports = {
                                                     content: `▶️ | Found track by title search: **${altTrack.title}**` 
                                                 });
                                                 
-                                                const altResult = await player.play(
+                                                const altResult = await safePlay(
                                                     interaction.member.voice.channel,
                                                     altTrack,
-                                                    { nodeOptions }
+                                                    { nodeOptions: {
+                                                        metadata: interaction.channel,
+                                                        leaveOnEmpty: true,
+                                                        leaveOnEmptyCooldown: 1000, // 1 second delay before leaving
+                                                        leaveOnEnd: true,
+                                                        leaveOnEndCooldown: 30000, // 30 second delay before leaving
+                                                    } }
                                                 );
                                                 
                                                 if (altResult && altResult.track) {
@@ -605,10 +653,16 @@ module.exports = {
                                             content: `▶️ | Found track by title search: **${altTrack.title}**` 
                                         });
                                         
-                                        const altResult = await player.play(
+                                        const altResult = await safePlay(
                                             interaction.member.voice.channel,
                                             altTrack,
-                                            { nodeOptions }
+                                            { nodeOptions: {
+                                                metadata: interaction.channel,
+                                                leaveOnEmpty: true,
+                                                leaveOnEmptyCooldown: 1000, // 1 second delay before leaving
+                                                leaveOnEnd: true,
+                                                leaveOnEndCooldown: 30000, // 30 second delay before leaving
+                                            } }
                                         );
                                         
                                         if (altResult && altResult.track) {
@@ -670,10 +724,16 @@ module.exports = {
                                     content: `▶️ | Found track by title search: **${altTrack.title}**` 
                                 });
                                 
-                                const altResult = await player.play(
+                                const altResult = await safePlay(
                                     interaction.member.voice.channel,
                                     altTrack,
-                                    { nodeOptions }
+                                    { nodeOptions: {
+                                        metadata: interaction.channel,
+                                        leaveOnEmpty: true,
+                                        leaveOnEmptyCooldown: 1000, // 1 second delay before leaving
+                                        leaveOnEnd: true,
+                                        leaveOnEndCooldown: 30000, // 30 second delay before leaving
+                                    } }
                                 );
                                 
                                 if (altResult && altResult.track) {

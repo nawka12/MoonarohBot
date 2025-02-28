@@ -8,6 +8,51 @@ require('dotenv').config();
 const { ActivityType } = require('discord.js');
 const config = require("./config.json");
 
+// Global error handlers to prevent crashes
+process.on('uncaughtException', (error) => {
+    console.error('Uncaught Exception:', error);
+    
+    // Additional safety: check if it's a YouTube download error
+    try {
+        if (error && error.message && (
+            error.message.includes("Downloading of") || 
+            error.message.includes("download failed")
+        )) {
+            console.log('Caught YouTube download error at process level');
+            
+            // Don't do anything else - this prevents the app from crashing
+            // The error has been logged, which is sufficient
+        }
+    } catch (e) {
+        console.error('Error in uncaughtException handler:', e);
+    }
+    
+    // Don't exit the process
+});
+
+process.on('unhandledRejection', (reason, promise) => {
+    console.error('Unhandled Promise Rejection:', reason);
+    // Log the promise that caused the rejection
+    console.log('Rejection at:', promise);
+    
+    // Additional safety: check if it's a YouTube download error
+    try {
+        if (reason && reason.message && (
+            reason.message.includes("Downloading of") || 
+            reason.message.includes("download failed")
+        )) {
+            console.log('Caught YouTube download error (promise rejection) at process level');
+            
+            // Don't do anything else - this prevents the app from crashing
+            // The error has been logged, which is sufficient
+        }
+    } catch (e) {
+        console.error('Error in unhandledRejection handler:', e);
+    }
+    
+    // Don't exit the process
+});
+
 // Global fallback tracks storage by guild ID
 const fallbackTracksMap = new Map();
 
@@ -115,22 +160,65 @@ const player = new Player(client, {
 player.fallbackTracksMap = fallbackTracksMap;
 player.attemptedTracksSet = attemptedTracksSet;
 
+// Monkey patch to override error-prone methods in YoutubeiExtractor
+try {
+    // Find the YoutubeiExtractor prototype
+    const YTExtractorProto = Object.getPrototypeOf(player.extractors.get("youtubei"));
+    
+    // Store the original stream method
+    const originalStream = YTExtractorProto.stream;
+    
+    // Override the stream method with a safer version
+    YTExtractorProto.stream = async function(track) {
+        try {
+            // Call the original method
+            return await originalStream.call(this, track);
+        } catch (error) {
+            console.error(`YoutubeiExtractor stream error caught for ${track.title}: ${error.message}`);
+            
+            // If it's a download error, handle it gracefully
+            if (error.message.includes("Downloading of") || error.message.includes("download failed")) {
+                console.log(`Download error for track ${track.title} - handled by monkey patch`);
+                
+                // Create a more specific error that will be handled by our error system
+                const enhancedError = new Error(`Could not extract stream from YouTube: ${error.message}`);
+                enhancedError.track = track;
+                throw enhancedError;
+            }
+            
+            // Rethrow other errors
+            throw error;
+        }
+    };
+    
+    console.log("Successfully applied monkey patch to YoutubeiExtractor");
+} catch (patchError) {
+    console.error("Failed to apply monkey patch to YoutubeiExtractor:", patchError.message);
+    // Don't crash if the patch fails, the bot will still work with our other error handlers
+}
+
 // Register extractors
 async function setupExtractors() {
     try {
         // Register the YoutubeiExtractor with enhanced options
-        player.extractors.register(YoutubeiExtractor, {
-            // Improved options for better streaming reliability
-            streamOptions: {
-                highWaterMark: 1 << 25, // 32MB for smoother streaming
-                dlChunkSize: 0, // Set to 0 to avoid download issues
-                begin: 0 // Start from the beginning
-            },
-            // Try using YT Music bridge mode which might have better success rates
-            overrideBridgeMode: "ytmusic",
-            // Disable the JavaScript player to use more reliable methods
-            disablePlayer: true
-        });
+        try {
+            player.extractors.register(YoutubeiExtractor, {
+                // Improved options for better streaming reliability
+                streamOptions: {
+                    highWaterMark: 1 << 25, // 32MB for smoother streaming
+                    dlChunkSize: 0, // Set to 0 to avoid download issues
+                    begin: 0 // Start from the beginning
+                },
+                // Try using YT Music bridge mode which might have better success rates
+                overrideBridgeMode: "ytmusic",
+                // Disable the JavaScript player to use more reliable methods
+                disablePlayer: true
+            });
+            console.log('YoutubeiExtractor registered successfully');
+        } catch (ytError) {
+            console.error('Error registering YoutubeiExtractor:', ytError);
+            // Continue even if YoutubeiExtractor fails - we'll fall back to default extractors
+        }
         
         // For v7, we pass an array of extractor classes
         // Important: DefaultExtractors is already an array in v7
@@ -139,6 +227,7 @@ async function setupExtractors() {
         console.log('Extractors loaded successfully');
     } catch (error) {
         console.error('Error loading extractors:', error);
+        // Don't crash if extractor setup fails, the bot will still work with limited functionality
     }
 }
 
@@ -156,6 +245,18 @@ player.events.on("error", (queue, error) => {
 
 player.events.on("playerError", (queue, error, track) => {
     console.log(`[${queue.guild.name}] Error emitted from the player while playing ${track.title}: ${error.message}`);
+    
+    // Utility function to safely play a track and handle errors
+    const safeNodePlay = async (trackToPlay) => {
+        try {
+            return await queue.node.play(trackToPlay);
+        } catch (err) {
+            console.error(`Safe node play caught error: ${err.message}`);
+            
+            // Don't throw, just return null to indicate failure
+            return null;
+        }
+    };
     
     // Handle all YouTube download-related errors, including from extractors
     if (error.message.includes("Downloading of") || 
@@ -243,7 +344,7 @@ player.events.on("playerError", (queue, error, track) => {
                     // Small delay to ensure messages appear in correct order
                     setTimeout(() => {
                         try {
-                            queue.node.play(fallbackTrack)
+                            safeNodePlay(fallbackTrack)
                                 .catch(fallbackError => {
                                     console.error(`Error playing fallback track: ${fallbackError.message}`);
                                     
@@ -260,7 +361,7 @@ player.events.on("playerError", (queue, error, track) => {
                                         }
                                         
                                         try {
-                                            queue.node.play(nextFallback)
+                                            safeNodePlay(nextFallback)
                                                 .catch(lastError => {
                                                     console.error(`Error playing last fallback track: ${lastError.message}`);
                                                     queue._handlingFallback = false;
@@ -307,7 +408,7 @@ player.events.on("playerError", (queue, error, track) => {
                                 }
                                 
                                 try {
-                                    queue.node.play(nextFallback)
+                                    safeNodePlay(nextFallback)
                                         .catch(e => {
                                             console.error(`Error playing recovery fallback: ${e.message}`);
                                             queue._handlingFallback = false;
@@ -386,7 +487,7 @@ player.events.on("playerError", (queue, error, track) => {
                                     });
                                 }
                                 
-                                queue.node.play(firstAlternative)
+                                safeNodePlay(firstAlternative)
                                     .catch(altError => {
                                         console.error(`Error playing alternative by title: ${altError.message}`);
                                         queue._handlingFallback = false;
