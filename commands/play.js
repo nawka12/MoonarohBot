@@ -82,7 +82,7 @@ module.exports = {
                 leaveOnEmpty: true,
                 // leaveOnEmptyCooldown: 300000, // 5 minutes
                 leaveOnEnd: true,
-                // leaveOnEndCooldown: 300000, // 5 minutes
+                leaveOnEndCooldown: 300000, // 5 minutes
             };
 
             // Play the first track
