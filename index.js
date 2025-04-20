@@ -286,34 +286,13 @@ player.events.on("playerError", (queue, error, track) => {
         return ipBlockSigns.some(sign => errorMessage.includes(sign)) || global.isYouTubeIpBlocked;
     };
     
-    // Handle IP blocking specifically
-    if (checkForIpBlock(error.message)) {
-        console.log(`[${queue.guild.name}] Detected YouTube IP blocking during playback`);
-        
-        if (queue.metadata) {
-            queue.metadata.send({
-                content: `⛔ | **YouTube has blocked our server's IP address.** The bot will now disconnect to prevent further errors. Please try again later or try a different source like Spotify or SoundCloud.`
-            });
-            
-            // Destroy the queue after a short delay to allow the message to be sent
-            setTimeout(() => {
-                try {
-                    if (queue.connection) {
-                        queue.connection.disconnect();
-                    }
-                    queue.delete();
-                    console.log(`[${queue.guild.name}] Queue destroyed due to YouTube IP block`);
-                } catch (disconnectError) {
-                    console.error(`Error disconnecting after IP block: ${disconnectError.message}`);
-                }
-                
-                // Reset the IP block flag after handling it in this guild
-                global.isYouTubeIpBlocked = false;
-            }, 500);
-            
-            return;
-        }
-    }
+    // Helper function to check for network timeouts
+    const isNetworkTimeout = (error) => {
+        return (error.message && error.message.includes("fetch failed")) || 
+               (error.cause && error.cause.code === "ETIMEDOUT") ||
+               (error.message && error.message.includes("ETIMEDOUT")) ||
+               (error.message && error.message.includes("network timeout"));
+    };
     
     // Utility function to safely play a track and handle errors
     const safeNodePlay = async (trackToPlay) => {
@@ -348,6 +327,187 @@ player.events.on("playerError", (queue, error, track) => {
             return null;
         }
     };
+    
+    // Handle IP blocking specifically
+    if (checkForIpBlock(error.message)) {
+        console.log(`[${queue.guild.name}] Detected YouTube IP blocking during playback`);
+        
+        if (queue.metadata) {
+            queue.metadata.send({
+                content: `⛔ | **YouTube has blocked our server's IP address.** The bot will now disconnect to prevent further errors. Please try again later or try a different source like Spotify or SoundCloud.`
+            });
+            
+            // Destroy the queue after a short delay to allow the message to be sent
+            setTimeout(() => {
+                try {
+                    if (queue.connection) {
+                        queue.connection.disconnect();
+                    }
+                    queue.delete();
+                    console.log(`[${queue.guild.name}] Queue destroyed due to YouTube IP block`);
+                } catch (disconnectError) {
+                    console.error(`Error disconnecting after IP block: ${disconnectError.message}`);
+                }
+                
+                // Reset the IP block flag after handling it in this guild
+                global.isYouTubeIpBlocked = false;
+            }, 500);
+            
+            return;
+        }
+    }
+    
+    // Handle network timeout errors
+    else if (isNetworkTimeout(error)) {
+        console.log(`[${queue.guild.name}] Network timeout error detected during playback: ${error.message}`);
+        
+        if (queue.metadata) {
+            queue.metadata.send({
+                content: `⚠️ | **Network timeout error while connecting to YouTube.** This could be temporary. Trying to continue...`
+            });
+            
+            // Similar approach as YouTube errors - try fallbacks or alternative searches
+            // This reuses our existing fallback mechanism
+            
+            // Get guild ID from the queue
+            const guildId = queue.guild.id;
+            
+            // Track the attempted URL to prevent infinite loops
+            if (!player.attemptedTracksSet.has(guildId)) {
+                player.attemptedTracksSet.set(guildId, new Set());
+            }
+            player.attemptedTracksSet.get(guildId).add(track.url);
+            
+            // Check for fallback tracks or try searching by title, reusing existing code
+            if (player.fallbackTracksMap.has(guildId) && player.fallbackTracksMap.get(guildId).length > 0) {
+                // Set flag that we're handling a fallback to prevent disconnect message
+                queue._handlingFallback = true;
+                
+                const fallbackTracks = player.fallbackTracksMap.get(guildId);
+                const fallbackTrack = fallbackTracks.shift(); // Get next track and remove from array
+                
+                console.log(`Got fallback track after network timeout: ${fallbackTrack ? fallbackTrack.title : "none"}`);
+                
+                if (fallbackTrack) {
+                    const fallbackIndex = 3 - fallbackTracks.length;
+                    
+                    // Add a marker to the track that it's a fallback attempt
+                    fallbackTrack._fallbackAttempt = true;
+                    fallbackTrack._fallbackAttemptNumber = fallbackIndex;
+                    
+                    if (queue.metadata) {
+                        queue.metadata.send({
+                            content: `▶️ | Network error occurred. Trying alternative (${fallbackIndex}/3): **${fallbackTrack.title}**`
+                        });
+                    }
+                    
+                    // Attempt to play the fallback track - reuse safeNodePlay
+                    try {
+                        console.log(`Attempting to play fallback track after timeout: ${fallbackTrack.title}`);
+                        
+                        // Small delay to ensure messages appear in correct order
+                        setTimeout(() => {
+                            safeNodePlay(fallbackTrack)
+                                .catch(fallbackError => {
+                                    console.error(`Error playing fallback track after timeout: ${fallbackError.message}`);
+                                    queue._handlingFallback = false;
+                                    
+                                    if (queue.metadata) {
+                                        queue.metadata.send({
+                                            content: `❌ | Network issues persist. Please try again later or try a different source like Spotify or SoundCloud.`
+                                        });
+                                    }
+                                });
+                        }, 1000);
+                    } catch (error) {
+                        console.error(`Exception playing fallback after timeout: ${error.message}`);
+                        queue._handlingFallback = false;
+                        
+                        if (queue.metadata) {
+                            queue.metadata.send({
+                                content: `❌ | Network issues continue. Please try again later.`
+                            });
+                        }
+                    }
+                }
+            } else {
+                // Try searching for an alternative if no fallbacks available
+                if (queue.metadata && track.title) {
+                    queue.metadata.send({
+                        content: `🔍 | Trying to find an alternative version of: **${track.title}**`
+                    });
+                    
+                    // Set flag that we're handling a fallback to prevent disconnect message
+                    queue._handlingFallback = true;
+                    
+                    // Try searching for the title instead of using the direct link
+                    try {
+                        setTimeout(async () => {
+                            const searchResults = await player.search(`${track.title} audio`, { requestedBy: track.requestedBy });
+                            
+                            if (searchResults && searchResults.tracks.length > 0) {
+                                // Get the first result that isn't the same URL
+                                const alternative = searchResults.tracks.find(t => t.url !== track.url);
+                                
+                                if (alternative) {
+                                    alternative._fallbackAttempt = true;
+                                    
+                                    if (queue.metadata) {
+                                        queue.metadata.send({
+                                            content: `▶️ | Found alternative version: **${alternative.title}**`
+                                        });
+                                    }
+                                    
+                                    safeNodePlay(alternative)
+                                        .catch(altError => {
+                                            console.error(`Error playing alternative after timeout: ${altError.message}`);
+                                            queue._handlingFallback = false;
+                                            
+                                            if (queue.metadata) {
+                                                queue.metadata.send({
+                                                    content: `❌ | Network issues persist. Please try again later or try a different platform.`
+                                                });
+                                            }
+                                        });
+                                } else {
+                                    queue._handlingFallback = false;
+                                    if (queue.metadata) {
+                                        queue.metadata.send({
+                                            content: `❌ | Network issues connecting to YouTube. Please try again later or try a different platform like SoundCloud.`
+                                        });
+                                    }
+                                }
+                            } else {
+                                queue._handlingFallback = false;
+                                if (queue.metadata) {
+                                    queue.metadata.send({
+                                        content: `❌ | Network issues connecting to YouTube. Please try again later.`
+                                    });
+                                }
+                            }
+                        }, 1000);
+                    } catch (searchError) {
+                        console.error(`Error searching after timeout: ${searchError.message}`);
+                        queue._handlingFallback = false;
+                        
+                        if (queue.metadata) {
+                            queue.metadata.send({
+                                content: `❌ | Continuing network issues. Please try again later.`
+                            });
+                        }
+                    }
+                } else {
+                    // No fallbacks and can't search - just notify the user
+                    if (queue.metadata) {
+                        queue.metadata.send({
+                            content: `❌ | Network timeout connecting to YouTube. Please try again later.`
+                        });
+                    }
+                }
+            }
+        }
+        return;
+    }
     
     // Handle all YouTube download-related errors, including from extractors
     if (error.message.includes("Downloading of") || 
