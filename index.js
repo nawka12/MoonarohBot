@@ -1,7 +1,7 @@
 const fs = require('fs');
 const path = require('path');
 const { Client, GatewayIntentBits, REST, Routes, Collection } = require("discord.js");
-const { Player } = require("discord-player");
+const { Player, QueryType } = require("discord-player");
 const { DefaultExtractors } = require("@discord-player/extractor");
 const { YoutubeiExtractor } = require("discord-player-youtubei");
 require('dotenv').config();
@@ -249,6 +249,16 @@ async function setupExtractors() {
         // Important: DefaultExtractors is already an array in v7
         await player.extractors.loadMulti(DefaultExtractors);
         
+        // Explicitly register the AttachmentExtractor to ensure it's available for file playback
+        try {
+            const { AttachmentExtractor } = require('@discord-player/extractor');
+            player.extractors.register(AttachmentExtractor, {});
+            console.log('AttachmentExtractor registered successfully');
+        } catch (attachError) {
+            console.error('Error registering AttachmentExtractor:', attachError);
+            // This is not critical as it should already be loaded via DefaultExtractors
+        }
+        
         console.log('Extractors loaded successfully');
     } catch (error) {
         console.error('Error loading extractors:', error);
@@ -327,6 +337,46 @@ player.events.on("playerError", (queue, error, track) => {
             return null;
         }
     };
+    
+    // Check if this is an attachment track that failed
+    if (track._isAttachment) {
+        console.log(`[${queue.guild.name}] Detected error playing attachment: ${track._originalAttachmentName || track.title}`);
+        
+        // Check if this is a Twitter audio file
+        if (track._isTwitterAudio) {
+            console.log(`[${queue.guild.name}] Error playing Twitter audio file`);
+            
+            if (queue.metadata) {
+                queue.metadata.send({
+                    content: `❌ | Failed to play Twitter audio file: **${track._originalAttachmentName || track.title}**. Twitter audio files may not be supported or have a special format. Try converting it to a standard MP3 file before uploading.`
+                });
+            }
+        } 
+        // For regular attachments
+        else {
+            if (queue.metadata) {
+                queue.metadata.send({
+                    content: `❌ | Failed to play attachment: **${track._originalAttachmentName || track.title}**. Error: ${error.message}`
+                });
+            }
+        }
+        
+        // Try to play the next song in the queue if there is one
+        if (queue.isPlaying() === false && queue.tracks.size > 0) {
+            const nextTrack = queue.tracks.data[0];
+            queue.tracks.remove(0);
+            queue.node.play(nextTrack)
+                .catch(err => {
+                    console.error(`Error playing next track after attachment failure: ${err.message}`);
+                    if (queue.metadata) {
+                        queue.metadata.send({
+                            content: `❌ | Error playing next track: ${err.message}`
+                        });
+                    }
+                });
+        }
+        return;
+    }
     
     // Handle IP blocking specifically
     if (checkForIpBlock(error.message)) {

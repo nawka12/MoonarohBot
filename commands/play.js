@@ -14,7 +14,9 @@ module.exports = {
     async execute(interaction, player) {
         await interaction.deferReply();
 
-        const query = interaction.options.getString("query", true);
+        const query = interaction.options.getString("query");
+        
+        // If we have a query, proceed with normal song search
         let actualQuery = query;
         let isExternalSource = false;
         let canStreamDirectly = false;

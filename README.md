@@ -26,6 +26,14 @@ Discord music bot using discord-player and discord-player-youtubei extractor.
 - `/stop` - Stop playback and clear the queue
 - `/loop` - Toggle loop/repeat mode for continuous playback
 - `/lyrics [song]` - Get lyrics for the current song or a specified song
+- `/attachment` - Handle attachment-based music playback
+
+## Current Status
+- **Active Development**: The bot is fully functional with all core music playback features implemented
+- **Node.js Version**: Requires Node.js 20+
+- **Discord.js**: Using discord.js v14
+- **Music Playback**: Powered by discord-player v7 with YouTube extractor
+- **Dependencies**: All external libraries are up-to-date
 
 ## Requirements
 - Node.js 20 or up
@@ -49,7 +57,10 @@ You can also customize the bot's activity status in `config.json`.
 ## Running the Bot
 ```bash
 # Run directly with Node.js
-node index.js
+npm start
+
+# Development mode with auto-restart
+npm run dev
 
 # OR use PM2 for production (recommended)
 npm install -g pm2
