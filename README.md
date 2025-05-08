@@ -1,6 +1,8 @@
 # MoonarohBot
 Discord music bot using discord-player and discord-player-youtubei extractor.
 
+# MoonarohBot project has been abruptly moved to [MoonarohBot-Rewrite](https://github.com/nawka12/MoonarohBot-rewrite) due to the original codebase is very hard to maintain after moving to discord-player 7.x.
+
 ## Features
 - Play music from multiple sources:
   - YouTube (search or direct links)
