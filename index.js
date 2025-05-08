@@ -185,43 +185,6 @@ const player = new Player(client, {
 player.fallbackTracksMap = fallbackTracksMap;
 player.attemptedTracksSet = attemptedTracksSet;
 
-// Monkey patch to override error-prone methods in YoutubeiExtractor
-try {
-    // Find the YoutubeiExtractor prototype
-    const YTExtractorProto = Object.getPrototypeOf(player.extractors.get("youtubei"));
-    
-    // Store the original stream method
-    const originalStream = YTExtractorProto.stream;
-    
-    // Override the stream method with a safer version
-    YTExtractorProto.stream = async function(track) {
-        try {
-            // Call the original method
-            return await originalStream.call(this, track);
-        } catch (error) {
-            console.error(`YoutubeiExtractor stream error caught for ${track.title}: ${error.message}`);
-            
-            // If it's a download error, handle it gracefully
-            if (error.message.includes("Downloading of") || error.message.includes("download failed")) {
-                console.log(`Download error for track ${track.title} - handled by monkey patch`);
-                
-                // Create a more specific error that will be handled by our error system
-                const enhancedError = new Error(`Could not extract stream from YouTube: ${error.message}`);
-                enhancedError.track = track;
-                throw enhancedError;
-            }
-            
-            // Rethrow other errors
-            throw error;
-        }
-    };
-    
-    console.log("Successfully applied monkey patch to YoutubeiExtractor");
-} catch (patchError) {
-    console.error("Failed to apply monkey patch to YoutubeiExtractor:", patchError.message);
-    // Don't crash if the patch fails, the bot will still work with our other error handlers
-}
-
 // Register extractors
 async function setupExtractors() {
     try {
