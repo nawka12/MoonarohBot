@@ -493,14 +493,46 @@ player.events.on("playerError", (queue, error, track) => {
                     // Try searching for the title instead of using the direct link
                     try {
                         setTimeout(async () => {
-                            const searchResults = await player.search(`${track.title} audio`, { requestedBy: track.requestedBy });
+                            let searchQuery = track.title; // Default to track title
+                            const searchParameters = {
+                                requestedBy: track.requestedBy,
+                            };
+    
+                            // Determine if the failed track was a YouTube track.
+                            const isFailedTrackFromYouTube = (track.url?.includes('youtube.com') || track.url?.includes('youtu.be')) && !track._isSoundCloud;
+    
+                            if (isFailedTrackFromYouTube) {
+                                searchParameters.searchEngine = QueryType.YOUTUBE_SEARCH; 
+                                console.log(`[Fallback NetworkErr] Original was YouTube. Searching YouTube for: "${searchQuery}"`);
+                            } else {
+                                searchQuery = `${track.title} audio`;
+                                console.log(`[Fallback NetworkErr] Original not YouTube or unknown. Searching AUTO for: "${searchQuery}"`);
+                            }
+    
+                            const searchResults = await player.search(searchQuery, searchParameters);
                             
                             if (searchResults && searchResults.tracks.length > 0) {
-                                // Get the first result that isn't the same URL
-                                const alternative = searchResults.tracks.find(t => t.url !== track.url);
+                                const attemptedInThisChain = player.attemptedTracksSet.get(guildId) || new Set();
+                                let alternative = null;
+
+                                if (isFailedTrackFromYouTube) {
+                                    alternative = searchResults.tracks.find(
+                                        t => (t.url?.includes('youtube.com') || t.url?.includes('youtu.be')) &&
+                                             !attemptedInThisChain.has(t.url) &&
+                                             t.url !== track.url
+                                    );
+                                }
+
+                                if (!alternative) {
+                                    alternative = searchResults.tracks.find(
+                                        t => !attemptedInThisChain.has(t.url) &&
+                                             t.url !== track.url
+                                    );
+                                }
                                 
                                 if (alternative) {
                                     alternative._fallbackAttempt = true;
+                                    player.attemptedTracksSet.get(guildId)?.add(alternative.url);
                                     
                                     if (queue.metadata) {
                                         queue.metadata.send({
@@ -523,7 +555,7 @@ player.events.on("playerError", (queue, error, track) => {
                                     queue._handlingFallback = false;
                                     if (queue.metadata) {
                                         queue.metadata.send({
-                                            content: `❌ | Network issues connecting to YouTube. Please try again later or try a different platform like SoundCloud.`
+                                            content: `❌ | Network issues connecting to YouTube. Could not find a suitable alternative for "${track.title}". Please try again later or try a different platform like SoundCloud.`
                                         });
                                     }
                                 }
@@ -531,7 +563,7 @@ player.events.on("playerError", (queue, error, track) => {
                                 queue._handlingFallback = false;
                                 if (queue.metadata) {
                                     queue.metadata.send({
-                                        content: `❌ | Network issues connecting to YouTube. Please try again later.`
+                                        content: `❌ | Network issues connecting to YouTube. No alternatives found for "${track.title}". Please try again later.`
                                     });
                                 }
                             }
@@ -752,43 +784,66 @@ player.events.on("playerError", (queue, error, track) => {
             // Set flag that we're handling a fallback to prevent disconnect message
             queue._handlingFallback = true;
             
-            // Check if this was a direct URL that failed (only one result found)
-            if (queue.metadata && track.url && track.url.includes("youtube.com/watch?v=")) {
+            if (queue.metadata && track.title) { // Simplified condition: if we have a title, try to search
                 queue.metadata.send({
-                    content: `🔍 | No alternatives available. Searching for tracks with title: **${track.title}**`
+                    content: `🔍 | No pre-loaded alternatives. Searching for tracks with title: **${track.title}**`
                 });
                 
                 // Try searching for the title instead of using the direct link
                 try {
                     setTimeout(async () => {
-                        const searchResults = await player.search(track.title, { requestedBy: track.requestedBy });
+                        let searchQuery = track.title;
+                        const searchParameters = {
+                            requestedBy: track.requestedBy,
+                        };
+
+                        const isFailedTrackFromYouTube = (track.url?.includes('youtube.com') || track.url?.includes('youtu.be')) && !track._isSoundCloud;
+
+                        if (isFailedTrackFromYouTube) {
+                            searchParameters.searchEngine = QueryType.YOUTUBE_SEARCH;
+                            console.log(`[Fallback YTError] Original was YouTube. Searching YouTube for: "${searchQuery}"`);
+                        } else {
+                            searchQuery = `${track.title} audio`;
+                            console.log(`[Fallback YTError] Original not YouTube or unknown. Searching AUTO for: "${searchQuery}"`);
+                        }
+
+                        const searchResults = await player.search(searchQuery, searchParameters);
                         
-                        if (searchResults && searchResults.tracks.length > 1) {
-                            // Filter out tracks that we've already tried
-                            const filteredTracks = searchResults.tracks
-                                .filter(t => !player.attemptedTracksSet.get(guildId).has(t.url))
-                                .slice(0, 2); // Get top 2 results that we haven't tried
-                            
-                            if (filteredTracks.length > 0) {
-                                console.log(`Found ${filteredTracks.length} alternative tracks by title that haven't been tried yet`);
+                        if (searchResults && searchResults.tracks.length > 0) {
+                             const attemptedInThisChain = player.attemptedTracksSet.get(guildId) || new Set();
+                            let alternative = null;
+
+                            if (isFailedTrackFromYouTube) {
+                                alternative = searchResults.tracks.find(
+                                    t => (t.url?.includes('youtube.com') || t.url?.includes('youtu.be')) &&
+                                         !attemptedInThisChain.has(t.url) &&
+                                         t.url !== track.url 
+                                );
+                            }
+
+                            if (!alternative) {
+                                alternative = searchResults.tracks.find(
+                                    t => !attemptedInThisChain.has(t.url) &&
+                                         t.url !== track.url
+                                );
+                            }
+
+                            if (alternative) {
+                                console.log(`Found ${searchResults.tracks.length} alternative tracks by title that haven't been tried yet`);
+                                player.attemptedTracksSet.get(guildId)?.add(alternative.url);
                                 
-                                // Store the remaining alternatives in fallbackTracksMap
-                                if (filteredTracks.length > 1) {
-                                    player.fallbackTracksMap.set(guildId, [filteredTracks[1]]);
-                                }
+                                // Store the remaining alternatives in fallbackTracksMap (optional, could be complex here)
+                                // For simplicity, we play the first good one found.
                                 
-                                // Play the first alternative
-                                const firstAlternative = filteredTracks[0];
-                                firstAlternative._fallbackAttempt = true;
-                                firstAlternative._fallbackAttemptNumber = 2;
+                                alternative._fallbackAttempt = true;
                                 
                                 if (queue.metadata) {
                                     queue.metadata.send({
-                                        content: `▶️ | Found similar track (1/2): **${firstAlternative.title}**`
+                                        content: `▶️ | Found similar track: **${alternative.title}**`
                                     });
                                 }
                                 
-                                safeNodePlay(firstAlternative)
+                                safeNodePlay(alternative)
                                     .catch(altError => {
                                         console.error(`Error playing alternative by title: ${altError.message}`);
                                         queue._handlingFallback = false;
@@ -803,23 +858,22 @@ player.events.on("playerError", (queue, error, track) => {
                                 queue._handlingFallback = false;
                                 if (queue.metadata) {
                                     queue.metadata.send({
-                                        content: `❌ | Could not find any new alternatives for this track. Try searching for "${track.title} lyrics" or "${track.title} audio" instead, or try a completely different song.`
+                                        content: `❌ | Could not find any new alternatives for "${track.title}". Try searching for "${track.title} lyrics" or "${track.title} audio" instead, or try a completely different song.`
                                     });
                                 }
                                 
-                                // Reset the attempts tracking for this guild since we're giving up
-                                player.attemptedTracksSet.set(guildId, new Set());
+                                // Reset the attempts tracking for this guild since we're giving up on this path
+                                // player.attemptedTracksSet.set(guildId, new Set()); // Be cautious with premature resets if other fallbacks are possible
                             }
                         } else {
                             queue._handlingFallback = false;
                             if (queue.metadata) {
                                 queue.metadata.send({
-                                    content: `❌ | Could not find any alternatives for this track. Try searching for "${track.title} lyrics" or "${track.title} audio" instead, or try a completely different song.`
+                                    content: `❌ | Could not find any alternatives for "${track.title}". Try searching for "${track.title} lyrics" or "${track.title} audio" instead, or try a completely different song.`
                                 });
                             }
-                            
-                            // Reset the attempts tracking for this guild since we're giving up
-                            player.attemptedTracksSet.set(guildId, new Set());
+                            // Reset the attempts tracking for this guild since we're giving up on this path
+                            // player.attemptedTracksSet.set(guildId, new Set());
                         }
                     }, 1000);
                 } catch (searchError) {
@@ -831,9 +885,8 @@ player.events.on("playerError", (queue, error, track) => {
                             content: `❌ | Error searching for alternatives. Please try using the title: "${track.title}" instead of a direct link.`
                         });
                     }
-                    
                     // Reset the attempts tracking for this guild since we're giving up
-                    player.attemptedTracksSet.set(guildId, new Set());
+                    // player.attemptedTracksSet.set(guildId, new Set());
                 }
             } else {
                 queue._handlingFallback = false;

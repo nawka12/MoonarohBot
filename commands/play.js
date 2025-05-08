@@ -1,4 +1,6 @@
 // commands/play.js
+const { QueryType } = require("discord-player");
+
 module.exports = {
     name: 'play',
     description: 'Plays a song from YouTube',
@@ -50,6 +52,7 @@ module.exports = {
             // If we found a track...
             if (externalResult && externalResult.tracks.length > 0) {
                 const extractedTrack = externalResult.tracks[0];
+                console.log("Extracted Apple Music Track:", extractedTrack);
                 
                 // For SoundCloud tracks
                 if (canStreamDirectly && query.includes('soundcloud.com')) {
@@ -72,10 +75,36 @@ module.exports = {
                 }
                 // For services that don't support streaming (Spotify, Apple Music)
                 else {
-                    actualQuery = extractedTrack.title;
+                    let artistName = extractedTrack.author; // Default to existing author
                     
-                    if (extractedTrack.author) {
-                        actualQuery = `${extractedTrack.author} ${extractedTrack.title}`;
+                    // Log the artist object from metadata for inspection
+                    if (extractedTrack.__metadata && extractedTrack.__metadata.source && extractedTrack.__metadata.source.artist) {
+                        console.log("Inspecting extractedTrack.__metadata.source.artist:", extractedTrack.__metadata.source.artist);
+                    } else {
+                        console.log("extractedTrack.__metadata.source.artist is not available.");
+                    }
+
+                    if (extractedTrack.__metadata && extractedTrack.__metadata.source && extractedTrack.__metadata.source.artist) {
+                        if (typeof extractedTrack.__metadata.source.artist.name === 'string') {
+                            artistName = extractedTrack.__metadata.source.artist.name;
+                            console.log(`Using artist from __metadata.source.artist.name: ${artistName}`);
+                        } else if (typeof extractedTrack.__metadata.source.artist === 'string') {
+                            // Fallback if artist is a direct string under source.artist
+                            artistName = extractedTrack.__metadata.source.artist;
+                            console.log(`Using artist from __metadata.source.artist (string): ${artistName}`);
+                        } else {
+                            console.log(`Artist field in __metadata.source.artist is not a string or an object with a name property. Structure:`, extractedTrack.__metadata.source.artist);
+                            console.log(`Falling back to extractedTrack.author: ${artistName}`);
+                        }
+                    } else {
+                        console.log(`Could not find __metadata.source.artist, falling back to extractedTrack.author: ${artistName}`);
+                    }
+                    
+                    actualQuery = extractedTrack.title; // Set base query to title
+                    
+                    // Only prepend artist if it's found and not the generic "Apple Music"
+                    if (artistName && artistName !== 'Apple Music' && typeof artistName === 'string') {
+                        actualQuery = `${artistName} ${extractedTrack.title}`;
                     }
                     
                     await interaction.followUp({ 
@@ -98,7 +127,8 @@ module.exports = {
             if (actualQuery !== query && !canStreamDirectly) {
                 // Use the YouTubei extractor with the song title
                 const searchResult = await player.search(actualQuery, { 
-                    requestedBy: interaction.user
+                    requestedBy: interaction.user,
+                    searchEngine: QueryType.YOUTUBE_SEARCH
                 }).catch((error) => {
                     console.error("YouTube search error:", error);
                     return null;
@@ -116,9 +146,16 @@ module.exports = {
         }
         
         // Regular search for non-external sources or fallback if extraction failed
-        const searchResult = await player.search(actualQuery, { 
-            requestedBy: interaction.user
-        }).catch((error) => {
+        const searchOptions = { requestedBy: interaction.user };
+        // If actualQuery is not a URL (e.g., it's a title from Spotify/Apple or user's direct search term)
+        // and it's not already flagged as a direct stream source (like SoundCloud direct link was intended)
+        // and it wasn't an external source initially (we handled specific searches for those above)
+        if (!(actualQuery.startsWith('http://') || actualQuery.startsWith('https://')) && !canStreamDirectly && !isExternalSource) {
+            // Default to YouTube search for terms.
+            searchOptions.searchEngine = QueryType.YOUTUBE_SEARCH; 
+            console.log(`Defaulting to YouTube search for query: ${actualQuery}`);
+        }
+        const searchResult = await player.search(actualQuery, searchOptions).catch((error) => {
             console.error("Search error:", error);
             return null;
         });
